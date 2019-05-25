@@ -50,6 +50,9 @@ class SerializationError(Exception):
 class InputValueMissing(Exception):
     """ thrown when the value of an input is needed but not present """
 
+class UnsignedSerializationError(Exception):
+    """ Thrown when attempting to serialize an unsigned input """
+
 class BCDataStream(object):
     def __init__(self):
         self.input = None
@@ -217,90 +220,95 @@ def match_decoded(decoded, to_match):
             return False
     return True
 
+def parse_sigs(sigs: bytes):
+    for s in sigs:
+        # sanity check transaction signatures' length:
+        #  - practical shortest ecdsa sig is 55 bytes (k=1/2 trick plus grinding)
+        #  - Schnorrs are 65 bytes.
+        #  - before LOW_S rule they could have length 73 even with minimal encoding.
+        if len(s) < 55 or len(s) > 73:
+            raise Exception("signature too long/short")
+    return [bh2u(s) for s in sigs]
 
-def parse_sig(x_sig):
-    return [None if x == NO_SIGNATURE else x for x in x_sig]
+def parse_pubkeys(pubs: bytes):
+    for p in pubs:
+        PublicKey.validate(p)
+    return [bh2u(p) for p in pubs]
 
-def safe_parse_pubkey(x):
-    try:
-        return xpubkey_to_pubkey(x)
-    except:
-        return x
+# input address heuristic ... TODO: the results of this should not be
+# relied on by any core logic code!
+def guess_from_scriptSig(d, _bytes):
+    # can raise exception for garbage scriptsig e.g., in coinbase
+    decoded = list(script_GetOp(_bytes))
 
-def parse_scriptSig(d, _bytes):
-    try:
-        decoded = list(script_GetOp(_bytes))
-    except Exception as e:
-        # coinbase transactions raise an exception
-        print_error("cannot find address in input script", bh2u(_bytes))
-        return
+    if len(decoded) == 0:
+        raise Exception('empty script')
 
+    # may be p2pk input
     match = [ opcodes.OP_PUSHDATA4 ]
     if match_decoded(decoded, match):
-        item = decoded[0][1]
-        # payto_pubkey
+        sigs = parse_sigs([decoded[0][1]])
         d['type'] = 'p2pk'
-        d['signatures'] = [bh2u(item)]
+        d['signatures'] = sigs
+        d['address'] = UnknownAddress()
         d['num_sig'] = 1
-        d['x_pubkeys'] = ["(pubkey)"]
         d['pubkeys'] = ["(pubkey)"]
         return
 
-    # non-generated TxIn transactions push a signature
-    # (seventy-something bytes) and then their public key
-    # (65 bytes) onto the stack:
+    # may be p2pkh input
     match = [ opcodes.OP_PUSHDATA4, opcodes.OP_PUSHDATA4 ]
     if match_decoded(decoded, match):
-        sig = bh2u(decoded[0][1])
-        x_pubkey = bh2u(decoded[1][1])
-        try:
-            signatures = parse_sig([sig])
-            pubkey, address = xpubkey_to_address(x_pubkey)
-        except:
-            print_error("cannot find address in input script", bh2u(_bytes))
-            return
+        sigs = parse_sigs([decoded[0][1]])
+        pubkeys = parse_pubkeys([decoded[1][1]])
+
+        address = Address.from_pubkey(pubkeys[0])
+
         d['type'] = 'p2pkh'
-        d['signatures'] = signatures
-        d['x_pubkeys'] = [x_pubkey]
+        d['signatures'] = sigs
         d['num_sig'] = 1
-        d['pubkeys'] = [pubkey]
+        d['pubkeys'] = pubkeys
         d['address'] = address
         return
 
-    # p2sh transaction, m of n
+    # may be p2sh multisig transaction, m of n
     match = [ opcodes.OP_0 ] + [ opcodes.OP_PUSHDATA4 ] * (len(decoded) - 1)
-    if not match_decoded(decoded, match):
-        print_error("cannot find address in input script", bh2u(_bytes))
+    if match_decoded(decoded, match):
+        sigs = parse_sigs([x[1] for x in decoded[1:-1]])
+        redeemScript = decoded[-1][1]
+        address = Address.from_multisig_script(redeemScript)
+        m, n, pubkeys = parse_multisig_redeemScript(redeemScript)
+
+        d['type'] = 'p2sh'
+        d['signatures'] = sigs
+        d['num_sig'] = m
+        d['pubkeys'] = pubkeys
+        d['redeemScript'] = redeemScript
+        d['address'] = address
         return
-    x_sig = [bh2u(x[1]) for x in decoded[1:-1]]
-    m, n, x_pubkeys, pubkeys, redeemScript = parse_redeemScript(decoded[-1][1])
-    # write result in d
-    d['type'] = 'p2sh'
-    d['num_sig'] = m
-    d['signatures'] = parse_sig(x_sig)
-    d['x_pubkeys'] = x_pubkeys
-    d['pubkeys'] = pubkeys
-    d['redeemScript'] = redeemScript
-    d['address'] = Address.from_P2SH_hash(hash160(redeemScript))
+
+    # if nothing found:
+    raise Exception('no match')
 
 
-def parse_redeemScript(s):
+def parse_multisig_redeemScript(s):
     dec2 = [ x for x in script_GetOp(s) ]
     # the following throw exception when redeemscript has one or zero opcodes
+    try:
+        op_m = dec2[0][0]
+        op_n = dec2[-2][0]
+    except:
+        raise Exception("short redeemScript")
     m = dec2[0][0] - opcodes.OP_1 + 1
     n = dec2[-2][0] - opcodes.OP_1 + 1
-    op_m = opcodes.OP_1 + m - 1
-    op_n = opcodes.OP_1 + n - 1
+    if n < 0 or n > 16:
+        raise Exception("bad multisig N")
+    if m < 0 or m > 16 or m > n:
+        raise Exception("bad multisig M")
     match_multisig = [ op_m ] + [opcodes.OP_PUSHDATA4]*n + [ op_n, opcodes.OP_CHECKMULTISIG ]
     if not match_decoded(dec2, match_multisig):
-        # causes exception in caller when mismatched
-        print_error("cannot find address in input script", bh2u(s))
-        return
-    x_pubkeys = [bh2u(x[1]) for x in dec2[1:-2]]
-    pubkeys = [safe_parse_pubkey(x) for x in x_pubkeys]
-    redeemScript = Script.multisig_script(m, [bytes.fromhex(p)
-                                              for p in pubkeys])
-    return m, n, x_pubkeys, pubkeys, redeemScript
+        raise Exception
+    pubkeys = parse_pubkeys([x[1] for x in dec2[1:-2]])
+    return m, n, pubkeys
 
 def get_address_from_output_script(_bytes):
     try:
@@ -330,6 +338,7 @@ def get_address_from_output_script(_bytes):
 
 
 def parse_input(vds):
+    """Parse a bitcoin transaction input; attempt to guess what kind of locking script / signatures were involved."""
     d = {}
     prevout_hash = hash_encode(vds.read_bytes(32))
     prevout_n = vds.read_uint32()
@@ -338,35 +347,27 @@ def parse_input(vds):
     d['prevout_hash'] = prevout_hash
     d['prevout_n'] = prevout_n
     d['sequence'] = sequence
-    d['address'] = UnknownAddress()
+    d['address'] = None
+    d['scriptSig'] = bh2u(scriptSig)
     if prevout_hash == '00'*32:
         d['type'] = 'coinbase'
-        d['scriptSig'] = bh2u(scriptSig)
     else:
-        d['x_pubkeys'] = []
-        d['pubkeys'] = []
-        d['signatures'] = {}
-        d['address'] = None
-        d['type'] = 'unknown'
-        d['num_sig'] = 0
-        d['scriptSig'] = bh2u(scriptSig)
         try:
-            parse_scriptSig(d, scriptSig)
-        except Exception as e:
-            print_error('{}: Failed to parse tx input {}:{}, probably a p2sh (non multisig?). Exception was: {}'.format(__name__, prevout_hash, prevout_n, repr(e)))
-            # that whole heuristic codepath is fragile; just ignore it when it dies.
-            # failing tx examples:
-            # 1c671eb25a20aaff28b2fa4254003c201155b54c73ac7cf9c309d835deed85ee
-            # 08e1026eaf044127d7103415570afd564dfac3131d7a5e4b645f591cd349bb2c
-            # override these once more just to make sure
-            d['address'] = UnknownAddress()
+            guess_from_scriptSig(d, scriptSig)
+            d['x_pubkeys'] = d['pubkeys']
+        except BaseException as e:
+            print_error('{}: Failed to guess type of tx input {}:{}, Exception was: {}'.format(__name__, prevout_hash, prevout_n, repr(e)))
+            # We don't set these since nothing should be relying on them:
+            # d['x_pubkeys'] = []
+            # d['pubkeys'] = []
+            # d['num_sig'] = 0
+            # d['signatures'] = []
             d['type'] = 'unknown'
-        if not Transaction.is_txin_complete(d):
-            d['value'] = vds.read_uint64()
     return d
 
 
 def parse_output(vds, i):
+    """Parse a bitcoin transaction output; detect standard output types."""
     d = {}
     d['value'] = vds.read_int64()
     scriptPubKey = vds.read_bytes(vds.read_compact_size())
@@ -590,54 +591,60 @@ class Transaction:
 
     @classmethod
     def get_siglist(self, txin, estimate_size=False):
-        # if we have enough signatures, we use the actual pubkeys
-        # otherwise, use extended pubkeys (with bip32 derivation)
         num_sig = txin.get('num_sig', 1)
         sign_schnorr = txin.get('sign_schnorr', False)
         if estimate_size:
             pubkey_size = self.estimate_pubkey_size_for_txin(txin)
             pk_list = ["00" * pubkey_size] * len(txin.get('x_pubkeys', [None]))
-            # we assume that signature will be 0x48 bytes long if ECDSA, 0x41 if Schnorr
+            # Schnorr are always 65 bytes; we allocate for max 72 bytes if ECDSA.
             if sign_schnorr:
-                siglen = 0x41
+                siglen = 65
             else:
-                siglen = 0x48
+                siglen = 72
             sig_list = [ "00" * siglen ] * num_sig
         else:
-            pubkeys, x_pubkeys = self.get_sorted_pubkeys(txin)
-            x_signatures = txin['signatures']
-            signatures = list(filter(None, x_signatures))
-            is_complete = len(signatures) == num_sig
-            if is_complete:
-                pk_list = pubkeys
-                sig_list = signatures
-            else:
-                pk_list = x_pubkeys
-                sig_list = [sig if sig else NO_SIGNATURE for sig in x_signatures]
+            sig_list = txin['signatures']
+            if any(s is None for s in sig_list):
+                raise UnsignedSerializationError("cannot serialize txin with missing signatures: %r"%(txin))
+            pk_list, x_pubkeys = self.get_sorted_pubkeys(txin)
         return pk_list, sig_list
 
     @classmethod
     def input_script(self, txin, estimate_size=False):
+        # Returns the complete scriptSig for an input, if possible.
+        # If a complete scriptSig is not available then it will raise
+        # UnsignedSerializationError, unless estimate_size=True and a suitably
+        # sized dummy placeholder can be constructed.
+
+        # always prefer verbatim scriptSig to be faithful to the original tx
+        scriptsig = txin.get('scriptSig')
+        if scriptsig is not None:
+            return scriptsig
+
         _type = txin['type']
-        if _type == 'coinbase':
-            return txin['scriptSig']
+
+        if _type not in ['p2pk', 'p2sh', 'p2pkh']:
+            raise UnsignedSerializationError("cannot serialize type %r"%(_type))
+
         pubkeys, sig_list = self.get_siglist(txin, estimate_size)
         script = ''.join(push_script(x) for x in sig_list)
         if _type == 'p2pk':
             pass
         elif _type == 'p2sh':
-            # put op_0 before script
+            # put multisig dummy-element op_0 before script
             script = '00' + script
             redeem_script = multisig_script(pubkeys, txin['num_sig'])
             script += push_script(redeem_script)
         elif _type == 'p2pkh':
             script += push_script(pubkeys[0])
-        elif _type == 'unknown':
-            return txin['scriptSig']
+        else:
+            raise RuntimeError('should not happen')
         return script
 
     @classmethod
     def is_txin_complete(self, txin):
+        if txin.get('scriptSig') is not None:
+            return True
         num_sig = txin.get('num_sig', 1)
         x_signatures = txin['signatures']
         signatures = list(filter(None, x_signatures))
@@ -665,17 +672,13 @@ class Transaction:
         return bh2u(bfh(txin['prevout_hash'])[::-1]) + int_to_hex(txin['prevout_n'], 4)
 
     @classmethod
-    def serialize_input(self, txin, script, estimate_size=False):
+    def serialize_input(self, txin, script):
         # Prev hash and index
         s = self.serialize_outpoint(txin)
         # Script length, script, sequence
         s += var_int(len(script)//2)
         s += script
         s += int_to_hex(txin.get('sequence', 0xffffffff - 1), 4)
-        # offline signing needs to know the input value
-        if ('value' in txin   # Legacy txs
-            and not (estimate_size or self.is_txin_complete(txin))):
-            s += int_to_hex(txin['value'], 8)
         return s
 
     def BIP_LI01_sort(self):
@@ -727,7 +730,7 @@ class Transaction:
         nLocktime = int_to_hex(self.locktime, 4)
         inputs = self.inputs()
         outputs = self.outputs()
-        txins = var_int(len(inputs)) + ''.join(self.serialize_input(txin, self.input_script(txin, estimate_size), estimate_size) for txin in inputs)
+        txins = var_int(len(inputs)) + ''.join(self.serialize_input(txin, self.input_script(txin, estimate_size)) for txin in inputs)
         txouts = var_int(len(outputs)) + ''.join(self.serialize_output(o) for o in outputs)
         return nVersion + txins + txouts + nLocktime
 
@@ -784,8 +787,7 @@ class Transaction:
         return s, r
 
     def is_complete(self):
-        s, r = self.signature_count()
-        return r == s
+        return all(self.is_txin_complete(txin) for txin in self.inputs())
 
     @staticmethod
     def verify_signature(pubkey, sig, msghash, reason=None):
