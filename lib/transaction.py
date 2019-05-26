@@ -725,14 +725,21 @@ class Transaction:
         preimage = nVersion + hashPrevouts + hashSequence + outpoint + scriptCode + amount + nSequence + hashOutputs + nLocktime + nHashType
         return preimage
 
-    def serialize(self, estimate_size=False):
+    def _serialize(self, scriptsig_list):
         nVersion = int_to_hex(self.version, 4)
         nLocktime = int_to_hex(self.locktime, 4)
         inputs = self.inputs()
+        if len(inputs) != len(scriptsig_list):
+            raise ValueError("should be length %d: %r"%(len(inputs),scriptsig_list)
         outputs = self.outputs()
-        txins = var_int(len(inputs)) + ''.join(self.serialize_input(txin, self.input_script(txin, estimate_size)) for txin in inputs)
+        txins = var_int(len(inputs)) + ''.join(self.serialize_input(*x) for x in zip(inputs, scriptsig_list))
         txouts = var_int(len(outputs)) + ''.join(self.serialize_output(o) for o in outputs)
         return nVersion + txins + txouts + nLocktime
+
+    def serialize(self, estimate_size=False):
+        """ Serialize complete transaction to hex, or make a dummy tx for size estimation. """
+        scripts = [self.input_script(txin, estimated_size) for txin in self.inputs()]
+        return self._serialize(scripts)
 
     def hash(self):
         warnings.warn("warning: deprecated tx.hash()", FutureWarning, stacklevel=2)
