@@ -10,6 +10,7 @@ from electroncash.bitcoin import COINBASE_MATURITY
 from electroncash.plugins import BasePlugin, hook, daemon_command
 from electroncash.i18n import _, ngettext, pgettext
 from electroncash.util import profiler, PrintError, InvalidPassword
+from electroncash import Network
 
 from .fusion import Fusion, can_fuse_from, can_fuse_to, is_tor_port
 from .server import FusionServer, Params
@@ -246,7 +247,15 @@ class FusionPlugin(BasePlugin):
         host = self.get_torhost()
 
         if self.has_auto_torport():
-            portlist = TOR_PORTS
+            portlist = []
+
+            network = Network.get_instance()
+            if network:
+                tc = network.tor_controller
+                if tc and tc.is_enabled() and tc.active_socks_port:
+                    portlist.append(tc.active_socks_port)
+
+            portlist.extend(TOR_PORTS)
         else:
             portlist = [self.config.get('cashfusion_tor_port_manual', DEFAULT_TOR_PORT)]
 
