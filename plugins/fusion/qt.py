@@ -253,6 +253,7 @@ class PasswordDialog(WindowModalDialog):
     def __init__(self, wallet, message, callback_ok = None, callback_cancel = None):
         parent = Plugin.get_suitable_dialog_window_parent(wallet)
         super().__init__(parent=parent, title=_("Enter Password"))
+        self.setWindowIcon(icon_fusion_logo)
         self.wallet = wallet
         self.callback_ok = callback_ok
         self.callback_cancel = callback_cancel
@@ -262,7 +263,12 @@ class PasswordDialog(WindowModalDialog):
         self.setLayout(vbox)
         msglabel = QLabel(message)
         msglabel.setWordWrap(True)
-        vbox.addWidget(msglabel)
+        hbox = QHBoxLayout()
+        iconlabel = QLabel(); iconlabel.setPixmap(icon_fusion_logo.pixmap(32))
+        hbox.addWidget(iconlabel)
+        hbox.addWidget(msglabel)
+        cmargins = hbox.contentsMargins(); cmargins.setBottom(10); hbox.setContentsMargins(cmargins)  # pad the bottom a bit
+        vbox.addLayout(hbox)
         self.pwle = QLineEdit()
         self.pwle.setEchoMode(2)
         vbox.addWidget(self.pwle)
@@ -338,12 +344,18 @@ class FusionButton(StatusBarButton):
         self.action_toggle = QAction(_("Auto-fuse in background"))
         self.action_toggle.setCheckable(True)
         self.action_toggle.triggered.connect(self.toggle_autofuse)
+        action_separator1 = QAction(self); action_separator1.setSeparator(True)
         action_wsettings = QAction(_("Wallet settings..."), self)
         action_wsettings.triggered.connect(self.show_wallet_settings)
         action_settings = QAction(_("CashFusion settings..."), self)
         action_settings.triggered.connect(self.plugin.show_settings_dialog)
+        action_separator2 = QAction(self); action_separator2.setSeparator(True)
+        action_util = QAction(_("Fusions..."), self)
+        action_util.triggered.connect(self.plugin.show_util_window)
 
-        self.addActions([self.action_toggle, action_wsettings, action_settings])
+        self.addActions([self.action_toggle, action_separator1,
+                         action_wsettings, action_settings,
+                         action_separator2, action_util])
 
         self.setContextMenuPolicy(Qt.ActionsContextMenu)
 
@@ -405,6 +417,7 @@ class SettingsDialog(QDialog):
         self.torscanthread_update.connect(self.torport_update)
 
         self.setWindowTitle(_("CashFusion - Settings"))
+        self.setWindowIcon(icon_fusion_logo)
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
@@ -454,7 +467,7 @@ class SettingsDialog(QDialog):
         self.cb_tor_auto.clicked.connect(self.cb_tor_auto_clicked)
         hbox.addWidget(self.cb_tor_auto)
 
-        btn = QPushButton(_("Utility..."))
+        btn = QPushButton(_("Fusions..."))
         btn.clicked.connect(self.plugin.show_util_window)
         main_layout.addLayout(Buttons(btn, CloseButton(self)))
 
@@ -544,6 +557,9 @@ class SettingsDialog(QDialog):
         self.update_tor()
 
     def showEvent(self, event):
+        super().showEvent(event)
+        if not event.isAccepted():
+            return
         if self.torscanthread is None:
             self.torscanthread = threading.Thread(name='Fusion-scan_torport_settings', target=self.scan_torport_loop)
             self.torscanthread.daemon = True
@@ -551,6 +567,9 @@ class SettingsDialog(QDialog):
             self.torscanthread.start()
 
     def closeEvent(self, event):
+        super().closeEvent(event)
+        if not event.isAccepted():
+            return
         self.torscanthread_stopping = True
         self.torscanthread_ping.set()
         self.torscanthread = None
@@ -562,9 +581,11 @@ class SettingsDialog(QDialog):
             self.torscanthread_ping.wait(10)
             self.torscanthread_ping.clear()
 
+
 class WalletSettingsDialog(WindowModalDialog):
     def __init__(self, parent, plugin, wallet):
         super().__init__(parent=parent, title=_("CashFusion - Wallet Settings"))
+        self.setWindowIcon(icon_fusion_logo)
         self.plugin = plugin
         self.wallet = wallet
 
@@ -732,6 +753,9 @@ class WalletSettingsDialog(WindowModalDialog):
         self.update()
 
     def closeEvent(self, event):
+        super().closeEvent(event)
+        if not event.isAccepted():
+            return
         self.setParent(None)
         del self.wallet._cashfusion_settings_window
 
@@ -740,7 +764,9 @@ class UtilWindow(QDialog):
         super().__init__(parent=plugin.settingswin)
         self.plugin = plugin
 
-        self.setWindowTitle("CashFusion - Control")
+        self.setWindowTitle("CashFusion - Fusions")
+        self.setWindowIcon(icon_fusion_logo)
+
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
@@ -784,6 +810,8 @@ class UtilWindow(QDialog):
         self.timer_status_update.start(2000)
 
         self.update_status()
+
+        self.resize(520, 240)  # TODO: Have this somehow not be hard-coded
 
         self.show()
 
