@@ -325,6 +325,9 @@ class ElectrumGui(QObject, PrintError):
             slf and slf._expire_cached_password(weakWallet)
         timer.setSingleShot(True); timer.timeout.connect(timeout); timer.start(10000)  # 10 sec
 
+    def cache_password(self, wallet, password):
+        self._cache_password(wallet, password)
+
     def _set_icon(self):
         icon = None
         if sys.platform == 'darwin':

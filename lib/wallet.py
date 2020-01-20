@@ -185,6 +185,7 @@ class Abstract_Wallet(PrintError, SPVDelegate):
         # verifier (SPV) and synchronizer are started in start_threads
         self.synchronizer = None
         self.verifier = None
+        self.weak_window = None  # Some of the GUI classes, such as the Qt ElectrumWindow, use this to refer back to themselves.  This should always be a weakref.ref (Weak.ref), or None
         # CashAccounts subsystem. Its network-dependent layer is started in
         # start_threads. Note: object instantiation should be lightweight here.
         # self.cashacct.load() is called later in this function to load data.

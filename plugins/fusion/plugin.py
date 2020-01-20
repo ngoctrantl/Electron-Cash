@@ -279,7 +279,7 @@ class FusionPlugin(BasePlugin):
 
     def enable_autofusing(self, wallet, password):
         if password is None and wallet.has_password():
-            raise InvalidPassword
+            raise InvalidPassword()
         else:
             wallet.check_password(password)
         self.autofusing_wallets[wallet] = password

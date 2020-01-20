@@ -11,8 +11,9 @@ from PyQt5.QtWidgets import *
 from electroncash.plugins import hook
 from electroncash.i18n import _, ngettext, pgettext
 from electroncash.util import print_error, profiler, PrintError, Weak, format_satoshis_plain, finalization_print_error, InvalidPassword
-from electroncash_gui.qt.util import EnterButton, CancelButton, Buttons, CloseButton, HelpLabel, OkButton, rate_limited, AppModalDialog, WaitingDialog
-from electroncash_gui.qt.main_window import StatusBarButton
+from electroncash.wallet import Abstract_Wallet
+from electroncash_gui.qt.util import EnterButton, CancelButton, Buttons, CloseButton, HelpLabel, OkButton, rate_limited, AppModalDialog, WaitingDialog, WindowModalDialog
+from electroncash_gui.qt.main_window import ElectrumWindow, StatusBarButton
 
 from .fusion import can_fuse_from, can_fuse_to, DEFAULT_SELF_FUSE
 from .server import FusionServer, Params
@@ -74,6 +75,7 @@ class Plugin(FusionPlugin):
         if not self.active:
             return
         wallet = address_list.wallet
+        window = address_list.parent
         network = wallet.network
         if not (can_fuse_from(wallet) and can_fuse_to(wallet) and network):
             return
@@ -84,31 +86,28 @@ class Plugin(FusionPlugin):
         coins = wallet.get_utxos(addrs, exclude_frozen=True, mature=True, confirmed_only=True, exclude_slp=True)
 
         def start_fusion():
-            password = None
-            error = ''
-            if wallet.has_password():
-                while True:
-                    msg = '\n'.join([error,_("Enter your password to fuse these coins")])
-                    password = address_list.parent.password_dialog(msg)
-                    if password is None: # cancelled
-                        return
-                    try:
-                        wallet.check_password(password)
-                        break
-                    except Exception as e:
-                        error = str(e)
-
-            with wallet.lock:
-                if not hasattr(wallet, '_fusions'):
-                    return
+            def do_it(password):
                 try:
-                    fusion = self.start_fusion(wallet, password, coins)
+                    with wallet.lock:
+                        if not hasattr(wallet, '_fusions'):
+                            return
+                        fusion = self.start_fusion(wallet, password, coins)
                 except RuntimeError as e:
-                    QMessageBox.critical(address_list, 'Error', _('CashFusion failed: %(err)s')%dict(err=str(e)))
+                    window.show_error(_('CashFusion failed: {error_message}').format(error_message=str(e)))
                     return
+                window.show_message(ngettext("One coin has been sent to CashFusion for fusing.",
+                                             "{count} coins have been sent to CashFusion for fusing.",
+                                             len(coins)).format(count=len(coins)))
+
+            has_pw, password = Plugin.get_cached_pw(wallet)
+            if has_pw and password is None:
+                d = PasswordDialog(wallet, _("Enter your password to fuse these coins"), do_it)
+                d.show()
+            else:
+                do_it(password)
 
         if coins:
-            menu.addAction(ngettext("Input one coin to CashFusion", "Input %(count)d coins to CashFusion", len(coins)) % dict(count = len(coins)),
+            menu.addAction(ngettext("Input one coin to CashFusion", "Input {count} coins to CashFusion", len(coins)).format(count = len(coins)),
                            start_fusion)
 
     @hook
@@ -122,14 +121,14 @@ class Plugin(FusionPlugin):
             return
 
         want_autofuse = wallet.storage.get('cashfusion_autofuse', False)
-        self.add_wallet(wallet)
+        self.add_wallet(wallet, window.gui_object.get_cached_password(wallet))
 
         if want_autofuse and not self.is_autofusing(wallet):
             def callback(password):
                 self.enable_autofusing(wallet, password)
                 button = window._cashfusion_button()
                 button.update_state()
-            d = PasswordDialog(window, wallet, _("Previously you had auto-Fusion enabled on this wallet. If you would like to keep automatic fusing in background, enter your password."),
+            d = PasswordDialog(wallet, _("Previously you had auto-fusion enabled on this wallet. If you would like to keep auto-fusing in the background, enter your password."),
                                callback_ok = callback)
             d.show()
             self.widgets.add(d)
@@ -159,7 +158,7 @@ class Plugin(FusionPlugin):
         def task():
             for f in fusions:
                 f.join()
-        d = WaitingDialog(window, _('Shutting down active CashFusions (may take a minute to finish)'), task)
+        d = WaitingDialog(window.top_level_window(), _('Shutting down active CashFusions (may take a minute to finish)'), task)
         d.exec_()
 
     @hook
@@ -198,13 +197,62 @@ class Plugin(FusionPlugin):
         self.settingswin.show()
         self.settingswin.raise_()
 
+    @classmethod
+    def window_for_wallet(cls, wallet):
+        ''' Convenience: Given a wallet instance, derefernces the weak_window
+        attribute of the wallet and returns a strong reference to the window.
+        May return None if the window is gone (deallocated).  '''
+        assert isinstance(wallet, Abstract_Wallet)
+        return (wallet.weak_window and wallet.weak_window()) or None
 
-class PasswordDialog(QDialog):
+    @classmethod
+    def get_suitable_dialog_window_parent(cls, wallet_or_window):
+        ''' Convenience: Given a wallet or a window instance, return a suitable
+        'top level window' parent to use for dialog boxes. '''
+        if isinstance(wallet_or_window, Abstract_Wallet):
+            wallet = wallet_or_window
+            window = cls.window_for_wallet(wallet)
+            return (window and window.top_level_window()) or None
+        elif isinstance(wallet_or_window, ElectrumWindow):
+            window = wallet_or_window
+            return window.top_level_window()
+        else:
+            raise TypeError(f"Expected a wallet or a window instance, instead got {type(wallet_or_window)}")
+
+    @classmethod
+    def get_cached_pw(cls, wallet):
+        ''' Will return a tuple: (bool, password) for the given wallet.  The
+        boolean is whether the wallet is password protected and the second
+        item is the cached password, if it's known, otherwise None if it is not
+        known.  If the wallet has no password protection the tuple is always
+        (False, None). '''
+        if not wallet.has_password():
+            return False, None
+        window = cls.window_for_wallet(wallet)
+        if not window:
+            raise RuntimeError(f'Wallet {wallet.diagnostic_name()} lacks a valid ElectrumWindow instance!')
+        pw = window.gui_object.get_cached_password(wallet)
+        if pw is not None:
+            try:
+                wallet.check_password(pw)
+            except InvalidPassword:
+                pw = None
+        return True, pw
+
+    @classmethod
+    def cache_pw(cls, wallet, password):
+        window = cls.window_for_wallet(wallet)
+        if window:
+            window.gui_object.cache_password(wallet, password)
+
+
+
+class PasswordDialog(WindowModalDialog):
     """ Slightly fancier password dialog -- can be used non-modal (asynchronous) and has internal password checking.
     To run non-modally, use .show with the callbacks; to run modally, use .run. """
-    def __init__(self, parent, wallet, message, callback_ok = None, callback_cancel = None):
-        super().__init__(parent=parent)
-        self.setWindowTitle(_("Password"))
+    def __init__(self, wallet, message, callback_ok = None, callback_cancel = None):
+        parent = Plugin.get_suitable_dialog_window_parent(wallet)
+        super().__init__(parent=parent, title=_("Enter Password"))
         self.wallet = wallet
         self.callback_ok = callback_ok
         self.callback_cancel = callback_cancel
@@ -226,39 +274,48 @@ class PasswordDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        cancelbutton = QPushButton(_("Cancel"))
-        cancelbutton.clicked.connect(self.reject)
-        buttons.addWidget(cancelbutton)
-        okbutton = QPushButton(_("OK"))
-        okbutton.setDefault(True)
+        buttons.addWidget(CancelButton(self))
+        okbutton = OkButton(self)
+        okbutton.clicked.disconnect()
         okbutton.clicked.connect(self.pw_entered)
         buttons.addWidget(okbutton)
         vbox.addLayout(buttons)
 
         self.badpass.hide()
 
+    def _on_pw_ok(self, password):
+        self.password = password
+        Plugin.cache_pw(self.wallet, password)  # to remember it for a time so as to not keep bugging the user
+        self.accept()
+        if self.callback_ok:
+            self.callback_ok(password)
+
+    def _chk_pass(self, password):
+        pw_ok = not self.wallet.has_password()
+        if not pw_ok:
+            try:
+                self.wallet.check_password(password)
+                pw_ok = True
+            except InvalidPassword:
+                pass
+        return pw_ok
+
     def pw_entered(self, ):
         password = self.pwle.text()
-        try:
-            self.wallet.check_password(password)
-            pw_ok = True
-        except InvalidPassword:
-            pw_ok = False
-        if pw_ok:
-            self.accept()
-            self.password = password
-            if self.callback_ok:
-                self.callback_ok(password)
+        if self._chk_pass(password):
+            self._on_pw_ok(password)
         else:
             self.badpass.show()
             self.pwle.clear()
             self.pwle.setFocus()
 
     def closeEvent(self, event):
-        if not self.result() and self.callback_cancel:
-            self.callback_cancel(self)
-        self.setParent(None)
-        self.deleteLater()
+        super().closeEvent(self)
+        if event.isAccepted():
+            if not self.result() and self.callback_cancel:
+                self.callback_cancel(self)
+            self.setParent(None)
+            self.deleteLater()
 
     def run(self):
         self.exec_()
@@ -305,18 +362,23 @@ class FusionButton(StatusBarButton):
     def toggle_autofuse(self):
         autofuse = self.plugin.is_autofusing(self.wallet)
         if not autofuse:
-            password = None
-            if self.wallet.has_password():
-                password = PasswordDialog(self, self.wallet, _("To perform auto-fusing in background, enter your password.")).run()
+            has_pw, password = Plugin.get_cached_pw(self.wallet)
+            if has_pw and password is None:
+                # Fixme: See if we can not use a blocking password dialog here.
+                password = PasswordDialog(self.wallet, _("To perform auto-fusing in background, enter your password.")).run()
                 if password is None:
                     return
-            self.plugin.enable_autofusing(self.wallet, password)
+            try:
+                self.plugin.enable_autofusing(self.wallet, password)
+            except InvalidPassword:
+                ''' Somehow the password changed from underneath us. Silenty ignore. '''
         else:
             running = self.plugin.disable_autofusing(self.wallet)
             if running:
-                res = QMessageBox.question(self, _("Disabling automatic Cash Fusions"),
-                                           _("New automatic fusions will not be started, but you have %(num)d currently in progress. Would you like to signal them to stop?")%dict(num=len(running)),
-                                           )
+                res = QMessageBox.question(Plugin.get_suitable_dialog_window_parent(self.wallet),
+                                           _("Disabling automatic Cash Fusions"),
+                                           _("New automatic fusions will not be started, but you have {num} currently in progress."
+                                             " Would you like to signal them to stop?").format(num=len(running)) )
                 if res == QMessageBox.Yes:
                     for f in running:
                         f.stop('Stop requested by user')
@@ -325,9 +387,11 @@ class FusionButton(StatusBarButton):
     def show_wallet_settings(self):
         win = getattr(self.wallet, '_cashfusion_settings_window', None)
         if not win:
-            win = WalletSettingsDialog(self, self.plugin, self.wallet)
+            win = WalletSettingsDialog(Plugin.get_suitable_dialog_window_parent(self.wallet),
+                                       self.plugin, self.wallet)
         win.show()
         win.raise_()
+
 
 class SettingsDialog(QDialog):
     torscanthread = None
@@ -340,7 +404,7 @@ class SettingsDialog(QDialog):
         self.torscanthread_ping = threading.Event()
         self.torscanthread_update.connect(self.torport_update)
 
-        self.setWindowTitle(_("CashFusion settings"))
+        self.setWindowTitle(_("CashFusion - Settings"))
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
@@ -498,16 +562,15 @@ class SettingsDialog(QDialog):
             self.torscanthread_ping.wait(10)
             self.torscanthread_ping.clear()
 
-class WalletSettingsDialog(QDialog):
+class WalletSettingsDialog(WindowModalDialog):
     def __init__(self, parent, plugin, wallet):
-        super().__init__(parent=parent)
+        super().__init__(parent=parent, title=_("CashFusion - Wallet Settings"))
         self.plugin = plugin
         self.wallet = wallet
 
         assert not hasattr(self.wallet, '_cashfusion_settings_window')
         self.wallet._cashfusion_settings_window = self
 
-        self.setWindowTitle(_("CashFusion wallet settings"))
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
@@ -567,6 +630,8 @@ class WalletSettingsDialog(QDialog):
         slayout.addWidget(self.combo_self_fuse)
 
         self.combo_self_fuse.activated.connect(self.chose_self_fuse)
+
+        main_layout.addLayout(Buttons(CloseButton(self)))
 
         self.update()
 
@@ -675,7 +740,7 @@ class UtilWindow(QDialog):
         super().__init__(parent=plugin.settingswin)
         self.plugin = plugin
 
-        self.setWindowTitle("CashFusion control")
+        self.setWindowTitle("CashFusion - Control")
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
