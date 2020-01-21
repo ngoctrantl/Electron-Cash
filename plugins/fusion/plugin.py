@@ -111,10 +111,11 @@ def select_random_coins(wallet, eligible, balance, max_coins):
 
     # Determine the fraction that should be used
     select_type, select_amount = wallet.storage.get('cashfusion_selector', DEFAULT_SELECTOR)
-    if select_type == 'size':
+
+    if select_type == 'size' and int(balance) != 0:
         # user wants to get a typical output of this size (in sats)
         fraction = COIN_FRACTION_FUDGE_FACTOR * select_amount / balance
-    elif select_type == 'count':
+    elif select_type == 'count' and int(select_amount) != 0:
         # user wants this number of coins
         fraction = COIN_FRACTION_FUDGE_FACTOR / select_amount
     elif select_type == 'fraction':
