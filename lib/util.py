@@ -784,6 +784,7 @@ def versiontuple(v):
     of things like '3.3.4CS'. Instead, use lib/version.parse_package_version'''
     return tuple(map(int, (v.split("."))))
 
+
 class Handlers:
     ''' A place to put app-global handlers. Currently the
     "do_in_main_thread_handler" lives here '''
@@ -800,7 +801,12 @@ class Handlers:
                           ''.join(traceback.format_stack()))
         func(*args, **kwargs)
 
+    # GUI subsystems that wish to use `do_in_main_thread` (defined below) must
+    # register a handler by setting this class-level attribute. See
+    # ElectrumGui._setup_do_in_main_thread_handler in gui/qt/__init__py for an
+    # example of how this is done for Qt.
     do_in_main_thread = default_do_in_main_thread_handler
+
 
 def do_in_main_thread(func, *args, **kwargs):
     ''' Calls func(*args, **kwargs) in the main thread, or immediately if the
