@@ -9,12 +9,13 @@ from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 
-from electroncash.plugins import hook
 from electroncash.i18n import _, ngettext, pgettext
+from electroncash.plugins import hook
 from electroncash.util import print_error, profiler, PrintError, Weak, format_satoshis_plain, finalization_print_error, InvalidPassword
 from electroncash.wallet import Abstract_Wallet
-from electroncash_gui.qt.util import EnterButton, CancelButton, Buttons, CloseButton, HelpLabel, OkButton, rate_limited, AppModalDialog, WaitingDialog, WindowModalDialog
+from electroncash_gui.qt.amountedit import BTCAmountEdit
 from electroncash_gui.qt.main_window import ElectrumWindow, StatusBarButton
+from electroncash_gui.qt.util import EnterButton, CancelButton, Buttons, CloseButton, HelpLabel, OkButton, rate_limited, AppModalDialog, WaitingDialog, WindowModalDialog
 
 from .fusion import can_fuse_from, can_fuse_to, DEFAULT_SELF_FUSE
 from .server import FusionServer, Params
@@ -591,6 +592,8 @@ class WalletSettingsDialog(WindowModalDialog):
         self.wallet = wallet
 
         assert not hasattr(self.wallet, '_cashfusion_settings_window')
+        main_window = self.wallet.weak_window()
+        assert main_window
         self.wallet._cashfusion_settings_window = self
 
         main_layout = QVBoxLayout()
@@ -601,9 +604,9 @@ class WalletSettingsDialog(WindowModalDialog):
 
         grid = QGridLayout() ; slayout.addLayout(grid)
 
-        self.radio_select_size = QRadioButton(_("Target typical output amount (sats)"))
+        self.radio_select_size = QRadioButton(_("Target typical output amount"))
         grid.addWidget(self.radio_select_size, 0, 0)
-        self.radio_select_fraction = QRadioButton(_("Choose random fraction (0-1)"))
+        self.radio_select_fraction = QRadioButton(_("Per-coin random chance"))
         grid.addWidget(self.radio_select_fraction, 1, 0)
         self.radio_select_count = QRadioButton(_("Target number of coins in wallet"))
         grid.addWidget(self.radio_select_count, 2, 0)
@@ -612,16 +615,25 @@ class WalletSettingsDialog(WindowModalDialog):
         self.radio_select_fraction.clicked.connect(self.edited_fraction)
         self.radio_select_count.clicked.connect(self.edited_count)
 
-        self.le_selector_size = QLineEdit()
-        grid.addWidget(self.le_selector_size, 0, 1)
-        self.le_selector_fraction = QLineEdit()
-        grid.addWidget(self.le_selector_fraction, 1, 1)
-        self.le_selector_count = QLineEdit()
-        grid.addWidget(self.le_selector_count, 2, 1)
+        self.amt_selector_size = BTCAmountEdit(main_window.get_decimal_point)
+        grid.addWidget(self.amt_selector_size, 0, 1)
+        self.sb_selector_fraction = QDoubleSpinBox()
+        self.sb_selector_fraction.setRange(0., 100.)
+        self.sb_selector_fraction.setSuffix("%")
+        self.sb_selector_fraction.setDecimals(1)
+        grid.addWidget(self.sb_selector_fraction, 1, 1)
+        self.sb_selector_count = QSpinBox()
+        self.sb_selector_count.setRange(COIN_FRACTION_FUDGE_FACTOR, 9999)
+        grid.addWidget(self.sb_selector_count, 2, 1)
 
-        self.le_selector_size.editingFinished.connect(self.edited_size)
-        self.le_selector_fraction.editingFinished.connect(self.edited_fraction)
-        self.le_selector_count.editingFinished.connect(self.edited_count)
+        self.amt_selector_size.editingFinished.connect(self.edited_size)
+        self.sb_selector_fraction.valueChanged.connect(self.edited_fraction)
+        self.sb_selector_count.valueChanged.connect(self.edited_count)
+
+        # Clicking the radio button should bring its corresponding widget buddy into focus
+        self.radio_select_size.clicked.connect(self.amt_selector_size.setFocus)
+        self.radio_select_fraction.clicked.connect(self.sb_selector_fraction.setFocus)
+        self.radio_select_count.clicked.connect(self.sb_selector_count.setFocus)
 
         self.l_warn_selection = QLabel(_("Your target number of coins is low. In order to achieve the best consolidation, make sure that you have only 1 queued auto-fusion, and have 'self-fusing' set to 'No', and enable fusing only when all coins are confirmed."))
         self.l_warn_selection.setWordWrap(True)
@@ -653,38 +665,53 @@ class WalletSettingsDialog(WindowModalDialog):
 
         self.combo_self_fuse.activated.connect(self.chose_self_fuse)
 
-        main_layout.addLayout(Buttons(CloseButton(self)))
-
-        self.update()
+        cbut = CloseButton(self)
+        main_layout.addLayout(Buttons(cbut))
+        cbut.setDefault(False)
+        cbut.setAutoDefault(False)
 
     def update(self):
         eligible, ineligible, sum_value, has_unconfirmed = select_coins(self.wallet)
         select_type, select_amount = self.wallet.storage.get('cashfusion_selector', DEFAULT_SELECTOR)
-        self.le_selector_size.setEnabled(select_type == 'size')
-        self.le_selector_fraction.setEnabled(select_type == 'fraction')
-        self.le_selector_count.setEnabled(select_type == 'count')
-        if select_type == 'size':
-            self.radio_select_size.setChecked(True)
-            sel_size = select_amount
-            if sum_value > 0:
-                sel_fraction = min(COIN_FRACTION_FUDGE_FACTOR * select_amount / sum_value, 1)
+
+        edit_widgets = [self.amt_selector_size, self.sb_selector_fraction, self.sb_selector_count]
+        for w in edit_widgets:
+            # Block spurious editingFinished signals and valueChanged signals as
+            # we modify the state and focus of widgets programatically below.
+            # On macOS not doing this led to a very strange/spazzy UI.
+            w.blockSignals(True)
+        try:
+            if select_type != 'size' and self.amt_selector_size.hasFocus():
+                self.amt_selector_size.setFocus(False)
+
+            self.amt_selector_size.setEnabled(select_type == 'size')
+            self.sb_selector_count.setEnabled(select_type == 'count')
+            self.sb_selector_fraction.setEnabled(select_type == 'fraction')
+            if select_type == 'size':
+                self.radio_select_size.setChecked(True)
+                sel_size = select_amount
+                if sum_value > 0:
+                    sel_fraction = min(COIN_FRACTION_FUDGE_FACTOR * select_amount / sum_value, 1)
+                else:
+                    sel_fraction = 1.
+            elif select_type == 'count':
+                self.radio_select_count.setChecked(True)
+                sel_size = max(sum_value / select_amount, 10000)
+                sel_fraction = COIN_FRACTION_FUDGE_FACTOR / max(select_amount, 1)
+            elif select_type == 'fraction':
+                self.radio_select_fraction.setChecked(True)
+                sel_size = max(sum_value * select_amount / COIN_FRACTION_FUDGE_FACTOR, 10000)
+                sel_fraction = select_amount
             else:
-                sel_fraction = 1
-        elif select_type == 'count':
-            self.radio_select_count.setChecked(True)
-            sel_size = max(sum_value / select_amount, 10000)
-            sel_fraction = COIN_FRACTION_FUDGE_FACTOR / select_amount
-        elif select_type == 'fraction':
-            self.radio_select_fraction.setChecked(True)
-            sel_size = max(sum_value * select_amount / COIN_FRACTION_FUDGE_FACTOR, 10000)
-            sel_fraction = select_amount
-        else:
-            self.wallet.storage.put('cashfusion_selector', None)
-            return self.update()
-        sel_count = COIN_FRACTION_FUDGE_FACTOR / sel_fraction
-        self.le_selector_size.setText(str(round(sel_size)))
-        self.le_selector_fraction.setText('%.03f' % (sel_fraction))
-        self.le_selector_count.setText(str(round(sel_count)))
+                self.wallet.storage.put('cashfusion_selector', None)
+                return self.update()
+            sel_count = COIN_FRACTION_FUDGE_FACTOR / sel_fraction
+            self.amt_selector_size.setAmount(round(sel_size))
+            self.sb_selector_fraction.setValue(sel_fraction * 100.)
+            self.sb_selector_count.setValue(sel_count)
+        finally:
+            # re-enable signals
+            for w in edit_widgets: w.blockSignals(False)
         self.l_warn_selection.setVisible(sel_fraction > 0.2)
 
         self.le_queued_autofuse.setText(str(self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)))
@@ -693,35 +720,21 @@ class WalletSettingsDialog(WindowModalDialog):
         self.combo_self_fuse.setCurrentIndex(self.wallet.storage.get('cashfusion_self_fuse_players', DEFAULT_SELF_FUSE) - 1)
 
     def edited_size(self,):
-        try:
-            size = int(self.le_selector_size.text())
-            if size < 10000:
-                size = 10000
-        except Exception as e:
-            pass
-        else:
-            self.wallet.storage.put('cashfusion_selector', ('size', size))
+        size = self.amt_selector_size.get_amount()
+        if size is None or size < 10000:
+            size = 10000
+        self.wallet.storage.put('cashfusion_selector', ('size', size))
         self.update()
 
     def edited_fraction(self,):
-        try:
-            fraction = float(self.le_selector_fraction.text())
-            fraction = max(0., min(fraction, 1.))
-        except Exception as e:
-            pass
-        else:
-            self.wallet.storage.put('cashfusion_selector', ('fraction', round(fraction, 3)))
+        fraction = self.sb_selector_fraction.value() / 100.
+        fraction = max(0., min(fraction, 1.))
+        self.wallet.storage.put('cashfusion_selector', ('fraction', round(fraction, 3)))
         self.update()
 
     def edited_count(self,):
-        try:
-            count = int(self.le_selector_count.text())
-            if count < COIN_FRACTION_FUDGE_FACTOR:
-                count = COIN_FRACTION_FUDGE_FACTOR
-        except Exception as e:
-            pass
-        else:
-            self.wallet.storage.put('cashfusion_selector', ('count', count))
+        count = self.sb_selector_count.value()
+        self.wallet.storage.put('cashfusion_selector', ('count', count))
         self.update()
 
     def edited_queued_autofuse(self,):
@@ -755,10 +768,14 @@ class WalletSettingsDialog(WindowModalDialog):
 
     def closeEvent(self, event):
         super().closeEvent(event)
-        if not event.isAccepted():
-            return
-        self.setParent(None)
-        del self.wallet._cashfusion_settings_window
+        if event.isAccepted():
+            self.setParent(None)
+            del self.wallet._cashfusion_settings_window
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if event.isAccepted():
+            self.update()
 
 class UtilWindow(QDialog):
     def __init__(self, plugin):
