@@ -9,7 +9,7 @@ from electroncash.bitcoin import public_key_from_private_key
 from electroncash.wallet import Abstract_Wallet, Standard_Wallet, ImportedWalletBase, Multisig_Wallet
 from electroncash.keystore import BIP32_KeyStore
 from electroncash.util import (format_satoshis, do_in_main_thread, PrintError,
-                               ServerErrorResponse)
+                               ServerError)
 from electroncash.transaction import Transaction, TYPE_SCRIPT, TYPE_ADDRESS, get_address_from_output_script
 from electroncash.address import Address, ScriptOutput, hash160, OpCodes
 from electroncash import schnorr
@@ -891,7 +891,7 @@ class Fusion(threading.Thread, PrintError):
 
                 try:
                     self.network.broadcast_transaction2(tx,)
-                except ServerErrorResponse as e:
+                except ServerError as e:
                     nice_msg, = e.args
                     server_msg = str(e.server_msg)
                     if r"txn-already-in-mempool" not in server_msg and r"txn-already-known" not in server_msg and r"transaction already in block chain" not in server_msg:
