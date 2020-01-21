@@ -785,6 +785,7 @@ class UtilWindow(QDialog):
         self.t_active_fusions.setContextMenuPolicy(Qt.CustomContextMenu)
         self.t_active_fusions.customContextMenuRequested.connect(self.create_menu_active_fusions)
         self.t_active_fusions.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.t_active_fusions.itemDoubleClicked.connect(self.on_double_clicked)
         clayout.addWidget(self.t_active_fusions)
 
 
@@ -870,21 +871,24 @@ class UtilWindow(QDialog):
             else:
                 msg = _('Cancel')
             menu.addAction(msg, cancel)
-        if selection_of_1_fusion:
-            txid = selection_of_1_fusion.txid
-            weak_window = selection_of_1_fusion.target_wallet.weak_window
-            if txid and weak_window:
-                def show_transaction():
-                    window = weak_window()
-                    if window:
-                        tx = window.wallet.transactions.get(txid)
-                        if tx:
-                            window.show_transaction(tx, selection_of_1_fusion.txlabel)
-                        else:
-                            window.show_error(_("Transaction not yet in wallet"))
-                menu.addAction(_("View tx"), show_transaction)
+        if selection_of_1_fusion and selection_of_1_fusion.txid:
+            menu.addAction(_("View tx"), lambda: self._open_tx_for_fusion(selection_of_1_fusion))
         if not menu.isEmpty():
             menu.exec_(self.t_active_fusions.viewport().mapToGlobal(position))
+
+    def on_double_clicked(self, item, column):
+        self._open_tx_for_fusion( item.data(0, Qt.UserRole)() )
+
+    def _open_tx_for_fusion(self, fusion):
+        if not fusion or not fusion.txid or not fusion.target_wallet:
+            return
+        window = fusion.target_wallet.weak_window and fusion.target_wallet.weak_window()
+        if window:
+            tx = window.wallet.transactions.get(fusion.txid)
+            if tx:
+                window.show_transaction(tx, fusion.txlabel)
+            else:
+                window.show_error(_("Transaction not yet in wallet"))
 
     def clicked_start_fuse(self, tier, event):
         if self.plugin.testserver is None:
