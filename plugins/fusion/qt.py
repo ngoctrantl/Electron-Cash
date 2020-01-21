@@ -882,11 +882,13 @@ class UtilWindow(QDialog):
     def _open_tx_for_fusion(self, fusion):
         if not fusion or not fusion.txid or not fusion.target_wallet:
             return
-        window = fusion.target_wallet.weak_window and fusion.target_wallet.weak_window()
+        wallet = fusion.target_wallet
+        window = wallet.weak_window and wallet.weak_window()
+        txid = fusion.txid
         if window:
-            tx = window.wallet.transactions.get(fusion.txid)
+            tx = window.wallet.transactions.get(txid)
             if tx:
-                window.show_transaction(tx, fusion.txlabel)
+                window.show_transaction(tx, wallet.get_label(txid))
             else:
                 window.show_error(_("Transaction not yet in wallet"))
 

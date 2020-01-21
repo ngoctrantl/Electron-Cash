@@ -41,8 +41,8 @@ from typing import Callable, Optional
 from . import bitcoin
 from . import version
 from .i18n import _
-from .util import print_error, print_stderr, user_dir, make_dir
-from .util import profiler, PrintError, DaemonThread, UserCancelled, ThreadJob
+from .util import (print_error, print_stderr, make_dir, profiler, user_dir,
+                   DaemonThread, PrintError, ThreadJob, UserCancelled)
 
 plugin_loaders = {}
 hooks = defaultdict(list)
@@ -510,6 +510,14 @@ def _get_func_if_hook(plugin, attr_name) -> Optional[Callable]:
             return func
 
 def run_hook(name, *args):
+    this_thread = threading.current_thread()
+    if this_thread is not threading.main_thread():
+        msg = (f'Warning: run_hook "{name}" being called from outside the main'
+               f' thread (thr: {this_thread.name}) may lead to undefined'
+                ' behavior. Please use util.do_in_main_thread to call run_hook'
+                ' if the hook in question does not return any results.'
+                '\nTraceback:\n') + ''.join(traceback.format_stack())
+        print_error(msg)
     f_list = hooks.get(name)
     if not f_list:
         # short-circuit return: most of the time this code path is taken

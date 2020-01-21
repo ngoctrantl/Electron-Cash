@@ -8,7 +8,8 @@ from electroncash.i18n import _, ngettext, pgettext
 from electroncash.bitcoin import public_key_from_private_key
 from electroncash.wallet import Abstract_Wallet, Standard_Wallet, ImportedWalletBase, Multisig_Wallet
 from electroncash.keystore import BIP32_KeyStore
-from electroncash.util import PrintError, ServerErrorResponse, format_satoshis
+from electroncash.util import (format_satoshis, do_in_main_thread, PrintError,
+                               ServerErrorResponse)
 from electroncash.transaction import Transaction, TYPE_SCRIPT, TYPE_ADDRESS, get_address_from_output_script
 from electroncash.address import Address, ScriptOutput, hash160, OpCodes
 from electroncash import schnorr
@@ -872,15 +873,21 @@ class Fusion(threading.Thread, PrintError):
                     label += f" {sorted(str(w) for w in self.source_wallet_info.keys())!r} ➡ {str(self.target_wallet)!r}"
                 # If we have any sweep-inputs, should also modify label
                 # If we have any send-outputs, should also modify label
-                for w in wallets:
-                    with w.lock:
-                        existing_label = w.labels.get(txid, None)
-                        if existing_label is not None:
-                            label = existing_label + '; ' + label
-                        w.set_label(txid, label)
+                def update_wallet_label_in_main_thread_paranoia(wallets, txid, label):
+                    '''We do it this way because run_hook may be invoked as a
+                    result of set_label and that's not well defined if not done
+                    in the main (GUI) thread. '''
+                    for w in wallets:
+                        with w.lock:
+                            existing_label = w.labels.get(txid, None)
+                            if existing_label is not None:
+                                label = existing_label + '; ' + label
+                            w.set_label(txid, label)
 
                 self.txid = txid
-                self.txlabel = label
+
+                do_in_main_thread(update_wallet_label_in_main_thread_paranoia,
+                                  wallets, txid, label)
 
                 try:
                     self.network.broadcast_transaction2(tx,)
