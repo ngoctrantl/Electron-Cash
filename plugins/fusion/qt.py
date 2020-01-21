@@ -618,7 +618,7 @@ class WalletSettingsDialog(WindowModalDialog):
         self.amt_selector_size = BTCAmountEdit(main_window.get_decimal_point)
         grid.addWidget(self.amt_selector_size, 0, 1)
         self.sb_selector_fraction = QDoubleSpinBox()
-        self.sb_selector_fraction.setRange(0., 100.)
+        self.sb_selector_fraction.setRange(0.1, 100.)
         self.sb_selector_fraction.setSuffix("%")
         self.sb_selector_fraction.setDecimals(1)
         grid.addWidget(self.sb_selector_fraction, 1, 1)
