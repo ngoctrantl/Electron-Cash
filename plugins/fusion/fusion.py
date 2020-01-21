@@ -9,7 +9,7 @@ from electroncash.bitcoin import public_key_from_private_key
 from electroncash.wallet import Abstract_Wallet, Standard_Wallet, ImportedWalletBase, Multisig_Wallet
 from electroncash.keystore import BIP32_KeyStore
 from electroncash.util import (format_satoshis, do_in_main_thread, PrintError,
-                               ServerError)
+                               ServerError, TxHashMismatch)
 from electroncash.transaction import Transaction, TYPE_SCRIPT, TYPE_ADDRESS, get_address_from_output_script
 from electroncash.address import Address, ScriptOutput, hash160, OpCodes
 from electroncash import schnorr
@@ -893,13 +893,43 @@ class Fusion(threading.Thread, PrintError):
                 except ServerError as e:
                     nice_msg, = e.args
                     server_msg = str(e.server_msg)
-                    if r"txn-already-in-mempool" not in server_msg and r"txn-already-known" not in server_msg and r"transaction already in block chain" not in server_msg:
+                    server_txid = None
+                    if isinstance(e, TxHashMismatch):
+                        # Hack to deal with a situation where TxHsh calculation
+                        # disagrees with server. It pains me to admit it, but on
+                        # occasion the txhash calculated by EC and by bitcoind
+                        # disagree. I am not sure if this is due to a bug in how
+                        # EC calculates the txhash or if it's due to a "feature"
+                        # in bitcoin where txids may malleate. This workaround
+                        # has been added as an experiment to see if users still
+                        # complain about missing labels. It may be removed later
+                        # if it's determined that the missing labels in history
+                        # were caused by something else.
+                        try:
+                            server_txid = bytes.fromhex(server_msg).hex()  # is it hex?
+                            if len(server_txid) == 64:  # is it 32 bytes like a txid?
+                                # We set the label so that user has a decent UX
+                                # and sees whatever label
+                                self.print_error("Server responded with a different txid:", server_txid, ", label applied to both txids as a workaround.")
+                                do_in_main_thread(update_wallet_label_in_main_thread_paranoia,
+                                                  wallets, server_txid, label)
+                            else:
+                                # Nope, not a txid.
+                                server_txid = None
+                        except (ValueError, TypeError):
+                            '''Nope, not an alternate txid'''
+                    acceptable_substrings = (
+                        r"txn-already-in-mempool", r"txn-already-known",
+                        r"transaction already in block chain",
+                    )
+                    if not server_txid and not any(s in server_msg for s in acceptable_substrings):
                         server_msg = server_msg.replace(txhex, "<...tx hex...>")
                         self.print_error("tx broadcast failed:", repr(server_msg))
-                        raise FusionError(f"could not broadcast the transaction! {nice_msg}")
+                        raise FusionError(f"could not broadcast the transaction! {nice_msg}") from e
 
                 self.print_error(f"successful broadcast of {txid}")
                 return True
+
             else:
                 bad_components = set(msg.bad_components)
                 if not bad_components.isdisjoint(mycomponent_idxes):
