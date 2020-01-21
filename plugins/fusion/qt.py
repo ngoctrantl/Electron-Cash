@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import time
-from functools import partial
-import weakref
 import threading
+import time
+import weakref
+
+from functools import partial
 
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
@@ -839,6 +840,8 @@ class UtilWindow(QDialog):
             wname = fusion.target_wallet.diagnostic_name()
             status, status_ext = fusion.status
             item = QTreeWidgetItem( [ wname, status, status_ext] )
+            item.setToolTip(0, wname)  # this doesn't always fit in the column
+            item.setToolTip(2, status_ext or '')  # neither does this
             item.setData(0, Qt.UserRole, weakref.ref(fusion))
             if fusion in reselect_fusions:
                 reselect_items.append(item)
@@ -854,6 +857,7 @@ class UtilWindow(QDialog):
         fusions = set(i.data(0, Qt.UserRole)() for i in selected)
         fusions.discard(None)
         statuses = set(f.status[0] for f in fusions)
+        selection_of_1_fusion = list(fusions)[0] if len(fusions) == 1 else None
         has_live = 'running' in statuses or 'waiting' in statuses
 
         menu = QMenu()
@@ -866,6 +870,19 @@ class UtilWindow(QDialog):
             else:
                 msg = _('Cancel')
             menu.addAction(msg, cancel)
+        if selection_of_1_fusion:
+            txid = selection_of_1_fusion.txid
+            weak_window = selection_of_1_fusion.target_wallet.weak_window
+            if txid and weak_window:
+                def show_transaction():
+                    window = weak_window()
+                    if window:
+                        tx = window.wallet.transactions.get(txid)
+                        if tx:
+                            window.show_transaction(tx, selection_of_1_fusion.txlabel)
+                        else:
+                            window.show_error(_("Transaction not yet in wallet"))
+                menu.addAction(_("View tx"), show_transaction)
         if not menu.isEmpty():
             menu.exec_(self.t_active_fusions.viewport().mapToGlobal(position))
 

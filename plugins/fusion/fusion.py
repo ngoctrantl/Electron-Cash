@@ -244,6 +244,8 @@ class Fusion(threading.Thread, PrintError):
         self.source_wallet_info = defaultdict(lambda:(set(), set(), set()))
         self.distinct_inputs = 0
         self.roundcount = 0
+        self.txid = None  # set iff completed ok
+        self.txlabel = None  # set iff completed ok
 
     def add_coins(self, coins, keypairs):
         """ Add given P2PKH coins to be used as inputs in a fusion.
@@ -878,6 +880,7 @@ class Fusion(threading.Thread, PrintError):
                         w.set_label(txid, label)
 
                 self.txid = txid
+                self.txlabel = label
 
                 try:
                     self.network.broadcast_transaction2(tx,)
