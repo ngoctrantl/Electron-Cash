@@ -623,7 +623,7 @@ class WalletSettingsDialog(WindowModalDialog):
         self.sb_selector_fraction.setDecimals(1)
         grid.addWidget(self.sb_selector_fraction, 1, 1)
         self.sb_selector_count = QSpinBox()
-        self.sb_selector_count.setRange(COIN_FRACTION_FUDGE_FACTOR, 9999)
+        self.sb_selector_count.setRange(COIN_FRACTION_FUDGE_FACTOR, 9999)  # Somewhat hardcoded limit of 9999 is arbitrary, have this come from constants?
         grid.addWidget(self.sb_selector_count, 2, 1)
 
         self.amt_selector_size.editingFinished.connect(self.edited_size)
@@ -637,31 +637,41 @@ class WalletSettingsDialog(WindowModalDialog):
 
         self.l_warn_selection = QLabel(_("Your target number of coins is low. In order to achieve the best consolidation, make sure that you have only 1 queued auto-fusion, and have 'self-fusing' set to 'No', and enable fusing only when all coins are confirmed."))
         self.l_warn_selection.setWordWrap(True)
+        self.l_warn_selection.setAlignment(Qt.AlignJustify|Qt.AlignVCenter)
         qs = QSizePolicy()
         qs.setRetainSizeWhenHidden(True)
         self.l_warn_selection.setSizePolicy(qs)
         slayout.addWidget(self.l_warn_selection)
+        slayout.setAlignment(self.l_warn_selection, Qt.AlignCenter)
 
         box = QGroupBox(_("Auto-fusion limits")) ; main_layout.addWidget(box)
         slayout = QVBoxLayout() ; box.setLayout(slayout)
         grid = QGridLayout() ; slayout.addLayout(grid)
         grid.addWidget(QLabel(_("Number of queued fusions")), 0, 0)
-        self.le_queued_autofuse = QLineEdit()
-        grid.addWidget(self.le_queued_autofuse, 0, 1)
+        self.sb_queued_autofuse = QSpinBox()
+        self.sb_queued_autofuse.setRange(1, 10)  # hard-coded rande 1-10, maybe have this come from some constants?
+        self.sb_queued_autofuse.setMinimumWidth(50)  # just so it doesn't end up too tiny
+        grid.addWidget(self.sb_queued_autofuse, 0, 1)
         self.cb_autofuse_only_all_confirmed = QCheckBox(_("Only autofuse when all coins are confirmed"))
         slayout.addWidget(self.cb_autofuse_only_all_confirmed)
+        grid.addWidget(QWidget(), 0, 2); grid.setColumnStretch(2, 1) # spacer
 
-        self.le_queued_autofuse.editingFinished.connect(self.edited_queued_autofuse)
+        self.sb_queued_autofuse.valueChanged.connect(self.edited_queued_autofuse)
         self.cb_autofuse_only_all_confirmed.clicked.connect(self.clicked_confirmed_only)
 
         box = QGroupBox(_("Self-fusing")) ; main_layout.addWidget(box)
         slayout = QVBoxLayout() ; box.setLayout(slayout)
 
-        slayout.addWidget(QLabel(_("Allow this wallet to participate multiply in the same fusion round?")))
+        lbl = QLabel(_("Allow this wallet to participate multiply in the same fusion round?"))
+        lbl.setWordWrap(True)
+        slayout.addWidget(lbl)
+        box = QHBoxLayout(); box.setContentsMargins(0,0,0,0)
         self.combo_self_fuse = QComboBox()
         self.combo_self_fuse.addItem(_('No'), 1)
         self.combo_self_fuse.addItem(_('Yes - as up to two players'), 2)
-        slayout.addWidget(self.combo_self_fuse)
+        box.addStretch(1)
+        box.addWidget(self.combo_self_fuse)
+        slayout.addLayout(box) ; del box
 
         self.combo_self_fuse.activated.connect(self.chose_self_fuse)
 
@@ -674,13 +684,13 @@ class WalletSettingsDialog(WindowModalDialog):
         eligible, ineligible, sum_value, has_unconfirmed = select_coins(self.wallet)
         select_type, select_amount = self.wallet.storage.get('cashfusion_selector', DEFAULT_SELECTOR)
 
-        edit_widgets = [self.amt_selector_size, self.sb_selector_fraction, self.sb_selector_count]
-        for w in edit_widgets:
-            # Block spurious editingFinished signals and valueChanged signals as
-            # we modify the state and focus of widgets programatically below.
-            # On macOS not doing this led to a very strange/spazzy UI.
-            w.blockSignals(True)
+        edit_widgets = [self.amt_selector_size, self.sb_selector_fraction, self.sb_selector_count, self.sb_queued_autofuse]
         try:
+            for w in edit_widgets:
+                # Block spurious editingFinished signals and valueChanged signals as
+                # we modify the state and focus of widgets programatically below.
+                # On macOS not doing this led to a very strange/spazzy UI.
+                w.blockSignals(True)
             self.amt_selector_size.setEnabled(select_type == 'size')
             self.sb_selector_count.setEnabled(select_type == 'count')
             self.sb_selector_fraction.setEnabled(select_type == 'fraction')
@@ -706,12 +716,13 @@ class WalletSettingsDialog(WindowModalDialog):
             self.amt_selector_size.setAmount(round(sel_size))
             self.sb_selector_fraction.setValue(sel_fraction * 100.)
             self.sb_selector_count.setValue(sel_count)
+            try: self.sb_queued_autofuse.setValue(int(self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)))
+            except (TypeError, ValueError): pass  # should never happen but paranoia pays off in the long-term
         finally:
             # re-enable signals
             for w in edit_widgets: w.blockSignals(False)
         self.l_warn_selection.setVisible(sel_fraction > 0.2)
 
-        self.le_queued_autofuse.setText(str(self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)))
         self.cb_autofuse_only_all_confirmed.setChecked(self.wallet.storage.get('cashfusion_autofuse_only_when_all_confirmed', DEFAULT_AUTOFUSE_CONFIRMED_ONLY))
 
         self.combo_self_fuse.setCurrentIndex(self.wallet.storage.get('cashfusion_self_fuse_players', DEFAULT_SELF_FUSE) - 1)
@@ -735,17 +746,12 @@ class WalletSettingsDialog(WindowModalDialog):
         self.update()
 
     def edited_queued_autofuse(self,):
-        try:
-            numfuse = int(self.le_queued_autofuse.text())
-            numfuse = max(1, min(numfuse, 10))
-        except Exception as e:
-            pass
-        else:
-            prevval = self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)
-            self.wallet.storage.put('cashfusion_queued_autofuse', numfuse)
-            if prevval > numfuse:
-                for f in self.wallet._fusions_auto:
-                    f.stop('User decreased queued-fuse limit', not_if_running = True)
+        prevval = self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)
+        numfuse = self.sb_queued_autofuse.value()
+        self.wallet.storage.put('cashfusion_queued_autofuse', numfuse)
+        if prevval > numfuse:
+            for f in self.wallet._fusions_auto:
+                f.stop('User decreased queued-fuse limit', not_if_running = True)
         self.update()
 
     def clicked_confirmed_only(self, checked):
