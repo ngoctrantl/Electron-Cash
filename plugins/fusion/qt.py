@@ -681,9 +681,6 @@ class WalletSettingsDialog(WindowModalDialog):
             # On macOS not doing this led to a very strange/spazzy UI.
             w.blockSignals(True)
         try:
-            if select_type != 'size' and self.amt_selector_size.hasFocus():
-                self.amt_selector_size.setFocus(False)
-
             self.amt_selector_size.setEnabled(select_type == 'size')
             self.sb_selector_count.setEnabled(select_type == 'count')
             self.sb_selector_fraction.setEnabled(select_type == 'fraction')
