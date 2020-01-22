@@ -4,38 +4,39 @@ Client-side fusion logic. See `class Fusion` for the main exposed API.
 This module has no GUI dependency.
 """
 
-from electroncash.i18n import _, ngettext, pgettext
+from electroncash import schnorr
+from electroncash.address import Address, ScriptOutput, hash160, OpCodes
 from electroncash.bitcoin import public_key_from_private_key
-from electroncash.wallet import Abstract_Wallet, Standard_Wallet, ImportedWalletBase, Multisig_Wallet
+from electroncash.i18n import _, ngettext, pgettext
 from electroncash.keystore import BIP32_KeyStore
+from electroncash.transaction import Transaction, TYPE_SCRIPT, TYPE_ADDRESS, get_address_from_output_script
 from electroncash.util import (format_satoshis, do_in_main_thread, PrintError,
                                ServerError, TxHashMismatch)
-from electroncash.transaction import Transaction, TYPE_SCRIPT, TYPE_ADDRESS, get_address_from_output_script
-from electroncash.address import Address, ScriptOutput, hash160, OpCodes
-from electroncash import schnorr
+from electroncash.wallet import Abstract_Wallet, Standard_Wallet, ImportedWalletBase, Multisig_Wallet
 
-from .comms import open_connection, send_pb, recv_pb
+from . import encrypt
 from . import fusion_pb2 as pb
 from . import pedersen
+from .comms import open_connection, send_pb, recv_pb
 from .covert import CovertSubmitter, is_tor_port
+from .protocol import Protocol
 from .util import FusionError, sha256, calc_initial_hash, calc_round_hash, size_of_input, size_of_output, component_fee, dust_limit, gen_keypair, tx_from_components, rand_position
 from .validation import validate_proof_internal, ValidationError, check_input_electrumx
-from . import encrypt
-from .protocol import Protocol
 
 from google.protobuf.message import DecodeError
 
-import threading
-from functools import partial
-from collections import defaultdict
-import secrets
+import copy
+import ecdsa
+import hashlib
 import itertools
-from math import ceil, floor
+import secrets
 import socket
 import sys
+import threading
 import time
-import hashlib
-import ecdsa
+from collections import defaultdict
+from functools import partial
+from math import ceil, floor
 
 # used for tagging fusions in a way privately derived from wallet name
 tag_seed = secrets.token_bytes(16)
@@ -859,7 +860,7 @@ class Fusion(threading.Thread, PrintError):
                 assert tx.is_complete()
                 txhex = tx.serialize()
 
-                txid = tx.txid()
+                self.txid = txid = tx.txid()
                 sum_in = sum(amt for (_, _), (pub, amt) in self.inputs)
                 sum_out = sum(amt for amt, addr in self.outputs)
                 sum_in_str = format_satoshis(sum_in, num_zeros=8)
@@ -883,46 +884,27 @@ class Fusion(threading.Thread, PrintError):
                                 label = existing_label + '; ' + label
                             w.set_label(txid, label)
 
-                self.txid = txid
-
                 do_in_main_thread(update_wallet_label_in_main_thread_paranoia,
                                   wallets, txid, label)
 
                 try:
-                    self.network.broadcast_transaction2(tx,)
+                    # deep copy here is extra (possibly unnecessary) paranoia to
+                    # freeze the tx that is broadcast and not allow it to point
+                    # to our all_components data, etc.
+                    self.network.broadcast_transaction2(copy.deepcopy(tx),)
                 except ServerError as e:
                     nice_msg, = e.args
                     server_msg = str(e.server_msg)
-                    server_txid = None
                     if isinstance(e, TxHashMismatch):
-                        # Hack to deal with a situation where TxHsh calculation
-                        # disagrees with server. It pains me to admit it, but on
-                        # occasion the txhash calculated by EC and by bitcoind
-                        # disagree. I am not sure if this is due to a bug in how
-                        # EC calculates the txhash or if it's due to a "feature"
-                        # in bitcoin where txids may malleate. This workaround
-                        # has been added as an experiment to see if users still
-                        # complain about missing labels. It may be removed later
-                        # if it's determined that the missing labels in history
-                        # were caused by something else.
-                        try:
-                            server_txid = bytes.fromhex(server_msg).hex()  # is it hex?
-                            if len(server_txid) == 64:  # is it 32 bytes like a txid?
-                                # We set the label so that user has a decent UX
-                                # and sees whatever label
-                                self.print_error("Server responded with a different txid:", server_txid, ", label applied to both txids as a workaround.")
-                                do_in_main_thread(update_wallet_label_in_main_thread_paranoia,
-                                                  wallets, server_txid, label)
-                            else:
-                                # Nope, not a txid.
-                                server_txid = None
-                        except (ValueError, TypeError):
-                            '''Nope, not an alternate txid'''
+                        # This should never actually happen. The TxHashMismatch
+                        # bug is believed to have been fixed as of
+                        # commit 4582391276a377c7a91a7a4285f4336abce2014b.
+                        self.print_error("Server responded with:", server_msg, ", we expected:", txid)
                     acceptable_substrings = (
                         r"txn-already-in-mempool", r"txn-already-known",
                         r"transaction already in block chain",
                     )
-                    if not server_txid and not any(s in server_msg for s in acceptable_substrings):
+                    if not any(s in server_msg for s in acceptable_substrings):
                         server_msg = server_msg.replace(txhex, "<...tx hex...>")
                         self.print_error("tx broadcast failed:", repr(server_msg))
                         raise FusionError(f"could not broadcast the transaction! {nice_msg}") from e
