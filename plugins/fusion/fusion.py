@@ -34,6 +34,7 @@ import socket
 import sys
 import threading
 import time
+import weakref
 from collections import defaultdict
 from functools import partial
 from math import ceil, floor
@@ -222,10 +223,11 @@ class Fusion(threading.Thread, PrintError):
     stopping_if_not_running=False
     status=('setup', None) # will always be 2-tuple; second param has extra details
 
-    def __init__(self, target_wallet, server_host, server_port, server_ssl, tor_host, tor_port):
+    def __init__(self, plugin, target_wallet, server_host, server_port, server_ssl, tor_host, tor_port):
         super().__init__()
 
         assert can_fuse_to(target_wallet)
+        self.weak_plugin = weakref.ref(plugin)
         self.target_wallet = target_wallet
         self.network = target_wallet.network
         assert self.network
@@ -309,6 +311,7 @@ class Fusion(threading.Thread, PrintError):
         self.source_wallet_info[wallet][0].update(coinstrs)
         self.source_wallet_info[wallet][1].update(txids)
         wallet.set_frozen_coin_state(coinstrs, True)
+        self.notify_coins_ui(wallet)
 
     def add_chooser(self, chooser):
         """ Add a coin-chooser function. This will be used for initial coin
@@ -339,9 +342,15 @@ class Fusion(threading.Thread, PrintError):
         """ Clear the inputs list and release frozen coins. """
         for wallet, (coins, mytxids, checked_txids) in self.source_wallet_info.items():
             wallet.set_frozen_coin_state(coins, False)
+            self.notify_coins_ui(wallet)
         self.source_wallet_info.clear() # save some memory as the checked_txids set can be big
         self.coins.clear()
         self.keypairs.clear()
+
+    def notify_coins_ui(self, wallet):
+        strong_plugin = self.weak_plugin and self.weak_plugin()
+        if strong_plugin:
+            strong_plugin.update_coins_ui(wallet)
 
     def start(self, inactive_timeout = None):
         if inactive_timeout is None:

@@ -5,21 +5,28 @@ import weakref
 
 from functools import partial
 
-from PyQt5.QtGui import *
 from PyQt5.QtCore import *
+from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 
 from electroncash.i18n import _, ngettext, pgettext
 from electroncash.plugins import hook
-from electroncash.util import print_error, profiler, PrintError, Weak, format_satoshis_plain, finalization_print_error, InvalidPassword
+from electroncash.util import (
+    do_in_main_thread, finalization_print_error, format_satoshis_plain,
+    InvalidPassword, print_error, PrintError, profiler)
 from electroncash.wallet import Abstract_Wallet
 from electroncash_gui.qt.amountedit import BTCAmountEdit
 from electroncash_gui.qt.main_window import ElectrumWindow, StatusBarButton
-from electroncash_gui.qt.util import EnterButton, CancelButton, Buttons, CloseButton, HelpLabel, OkButton, rate_limited, AppModalDialog, WaitingDialog, WindowModalDialog
+from electroncash_gui.qt.util import (
+    AppModalDialog, Buttons, CancelButton, CloseButton, EnterButton, HelpLabel,
+    OkButton, WaitingDialog, WindowModalDialog)
 
 from .fusion import can_fuse_from, can_fuse_to, DEFAULT_SELF_FUSE
 from .server import FusionServer, Params
-from .plugin import FusionPlugin, TOR_PORTS, is_tor_port, server_list, get_upnp, DEFAULT_SELECTOR, COIN_FRACTION_FUDGE_FACTOR, select_coins, DEFAULT_QUEUED_AUTOFUSE, DEFAULT_AUTOFUSE_CONFIRMED_ONLY
+from .plugin import (
+    FusionPlugin, TOR_PORTS, is_tor_port, server_list, get_upnp,
+    DEFAULT_SELECTOR, COIN_FRACTION_FUDGE_FACTOR, select_coins,
+    DEFAULT_QUEUED_AUTOFUSE, DEFAULT_AUTOFUSE_CONFIRMED_ONLY)
 
 from pathlib import Path
 heredir = Path(__file__).parent
@@ -198,6 +205,17 @@ class Plugin(FusionPlugin):
             self.widgets.add(self.settingswin)
         self.settingswin.show()
         self.settingswin.raise_()
+
+    def update_coins_ui(self, wallet):
+        ''' Overrides super, the Fusion thread calls this in its thread context
+        to indicate it froze/unfroze some coins. We must update the coins tab,
+        but only in the main thread.'''
+        def update_coins_tab(wallet):
+            strong_window = wallet and wallet.weak_window and wallet.weak_window()
+            if strong_window:
+                strong_window.utxo_list.update()  # this is rate_limited so it's ok to call it many times in rapid succession.
+
+        do_in_main_thread(update_coins_tab, wallet)
 
     @classmethod
     def window_for_wallet(cls, wallet):

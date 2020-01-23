@@ -336,7 +336,7 @@ class FusionPlugin(BasePlugin):
                 torport = self.scan_torport() # may block for a very short time ...
             if torport is None:
                 raise RuntimeError("can't find tor port")
-        fusion = Fusion(target_wallet, host, port, ssl, torhost, torport)
+        fusion = Fusion(self, target_wallet, host, port, ssl, torhost, torport)
         target_wallet._fusions.add(fusion)
         source_wallet._fusions.add(fusion)
         fusion.add_coins_from_wallet(source_wallet, password, coins)
@@ -422,6 +422,12 @@ class FusionPlugin(BasePlugin):
             self.testserver = None
         except Exception:
             pass
+
+    def update_coins_ui(self, wallet):
+        ''' Default implementation does nothing. Qt plugin subclass overrides
+        this, which sends a signal to the main thread to update the coins tab.
+        This is called by the Fusion thread (in its thread context) when it
+        freezes & unfreezes coins. '''
 
     @daemon_command
     def fusion_test_server_start(self, daemon, config):
