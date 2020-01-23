@@ -10,7 +10,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 
 from electroncash.i18n import _, ngettext, pgettext
-from electroncash.plugins import hook
+from electroncash.plugins import hook, run_hook
 from electroncash.util import (
     do_in_main_thread, finalization_print_error, format_satoshis_plain,
     InvalidPassword, print_error, PrintError, profiler)
@@ -18,8 +18,8 @@ from electroncash.wallet import Abstract_Wallet
 from electroncash_gui.qt.amountedit import BTCAmountEdit
 from electroncash_gui.qt.main_window import ElectrumWindow, StatusBarButton
 from electroncash_gui.qt.util import (
-    AppModalDialog, Buttons, CancelButton, CloseButton, EnterButton, HelpLabel,
-    OkButton, WaitingDialog, WindowModalDialog)
+    Buttons, CancelButton, CloseButton, EnterButton, HelpLabel, OkButton,
+    WaitingDialog, WindowModalDialog)
 
 from .fusion import can_fuse_from, can_fuse_to, DEFAULT_SELF_FUSE
 from .server import FusionServer, Params
@@ -281,22 +281,24 @@ class PasswordDialog(WindowModalDialog):
 
         vbox = QVBoxLayout()
         self.setLayout(vbox)
-        msglabel = QLabel(message)
-        msglabel.setWordWrap(True)
+        self.msglabel = QLabel(message)
+        self.msglabel.setWordWrap(True)
+        self.msglabel.setMinimumWidth(250)
+        self.msglabel.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Expanding)
         hbox = QHBoxLayout()
         iconlabel = QLabel(); iconlabel.setPixmap(icon_fusion_logo.pixmap(32))
         hbox.addWidget(iconlabel)
-        hbox.addWidget(msglabel)
+        hbox.addWidget(self.msglabel, 1, Qt.AlignLeft|Qt.AlignVCenter)
         cmargins = hbox.contentsMargins(); cmargins.setBottom(10); hbox.setContentsMargins(cmargins)  # pad the bottom a bit
-        vbox.addLayout(hbox)
+        vbox.addLayout(hbox, 1)
         self.pwle = QLineEdit()
         self.pwle.setEchoMode(2)
-        vbox.addWidget(self.pwle)
-        self.badpass = QLabel("<i>" + _("Incorrect password entered. Please try again.") + "</i>")
-        qs = QSizePolicy()
-        qs.setRetainSizeWhenHidden(True)
-        self.badpass.setSizePolicy(qs)
-        vbox.addWidget(self.badpass)
+        grid_for_hook_api = QGridLayout()
+        grid_for_hook_api.setContentsMargins(0,0,0,0)
+        grid_for_hook_api.addWidget(self.pwle, 0, 0)
+        run_hook('password_dialog', self.pwle, grid_for_hook_api, 0)  # this is for the virtual keyboard plugin
+        vbox.addLayout(grid_for_hook_api)
+        self.badpass_msg = "<i>" + _("Incorrect password entered. Please try again.") + "</i>"
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
@@ -306,8 +308,6 @@ class PasswordDialog(WindowModalDialog):
         okbutton.clicked.connect(self.pw_entered)
         buttons.addWidget(okbutton)
         vbox.addLayout(buttons)
-
-        self.badpass.hide()
 
     def _on_pw_ok(self, password):
         self.password = password
@@ -331,7 +331,7 @@ class PasswordDialog(WindowModalDialog):
         if self._chk_pass(password):
             self._on_pw_ok(password)
         else:
-            self.badpass.show()
+            self.msglabel.setText(self.badpass_msg)
             self.pwle.clear()
             self.pwle.setFocus()
 
@@ -386,7 +386,7 @@ class FusionButton(StatusBarButton):
         self.action_toggle.setChecked(autofuse)
         if autofuse:
             self.setIcon(self.icon_autofusing_on)
-            self.setToolTip(_('CashFusion is fusing in background'))
+            self.setToolTip(_('CashFusion is fusing in the background'))
         else:
             self.setIcon(self.icon_autofusing_off)
             self.setToolTip(_('CashFusion is paused'))
@@ -397,7 +397,7 @@ class FusionButton(StatusBarButton):
             has_pw, password = Plugin.get_cached_pw(self.wallet)
             if has_pw and password is None:
                 # Fixme: See if we can not use a blocking password dialog here.
-                password = PasswordDialog(self.wallet, _("To perform auto-fusing in background, enter your password.")).run()
+                password = PasswordDialog(self.wallet, _("To perform auto-fusing in the background, please enter your password.")).run()
                 if password is None:
                     return
             try:
