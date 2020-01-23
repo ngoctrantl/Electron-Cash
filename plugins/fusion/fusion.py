@@ -310,7 +310,7 @@ class Fusion(threading.Thread, PrintError):
         txids = set(t for t,i in coindict)
         self.source_wallet_info[wallet][0].update(coinstrs)
         self.source_wallet_info[wallet][1].update(txids)
-        wallet.set_frozen_coin_state(coinstrs, True)
+        wallet.set_frozen_coin_state(coinstrs, True, temporary = True)
         self.notify_coins_ui(wallet)
 
     def add_chooser(self, chooser):
