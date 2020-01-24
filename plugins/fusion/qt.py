@@ -36,8 +36,8 @@ icon_fusion_logo_gray = QIcon(str(heredir / 'Cash Fusion Logo - No Text Gray.svg
 class Plugin(FusionPlugin):
     utilwin = None
     settingswin = None
+    gui = None
     initted = False
-    active = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs) # gives us self.config
@@ -48,13 +48,10 @@ class Plugin(FusionPlugin):
         # Shut down plugin.
         # This can be triggered from one wallet's window while
         # other wallets' windows have plugin-related modals open.
-        self.active = False
         # TODO: disable auto-fusing
         for window in self.gui.windows:
             # this could be slow since it touches windows one by one... could optimize this by dispatching simultaneously.
             self.on_close_window(window)
-        self.utilwin = None
-        self.settingswin = None
         # Clean up
         for w in self.widgets:
             try:
@@ -65,6 +62,11 @@ class Plugin(FusionPlugin):
             except Exception:
                 # could be <RuntimeError: wrapped C/C++ object of type SettingsDialog has been deleted> but really we just want to suppress all exceptions
                 pass
+        # clean up member attributes to be tidy
+        self.utilwin = None  # should trigger a deletion of object if not already dead
+        self.settingswin = None  # again, same
+        self.gui = None
+        self.initted = False
 
     @hook
     def init_qt(self, gui):
@@ -72,7 +74,7 @@ class Plugin(FusionPlugin):
         # any other plugin is initialized after us.
         if self.initted:
             return
-        self.initted = self.active = True
+        self.initted = self.active = True  # self.active is declared in super
         self.gui = gui
 
         # We also have to find which windows are already open, and make
@@ -150,6 +152,9 @@ class Plugin(FusionPlugin):
                                callback_ok = callback)
             d.show()
             self.widgets.add(d)
+
+        # this runs at most once and only if absolutely no Tor ports are found
+        self._maybe_prompt_user_if_they_want_integrated_tor_if_no_tor_found()
 
     @hook
     def on_close_window(self, window):
@@ -267,6 +272,55 @@ class Plugin(FusionPlugin):
         if window:
             window.gui_object.cache_password(wallet, password)
 
+    _integrated_tor_asked = [False, None]
+    def _maybe_prompt_user_if_they_want_integrated_tor_if_no_tor_found(self):
+        if any(self._integrated_tor_asked):
+            # timer already active or already prompted user
+            return
+        weak_self = weakref.ref(self)
+        def chk_tor_ok():
+            self = weak_self()
+            if not self:
+                return
+            self._integrated_tor_asked[1] = None  # kill QTimer reference
+            if self.active and self.gui and self.gui.windows and self.tor_port_good is None and not self._integrated_tor_asked[0]:
+                # prompt user to enable automatic Tor if not enabled and no auto-detected Tor ports were found
+                window = self.gui.windows[-1]
+                network = self.gui.daemon.network
+                if network and not network.tor_controller.is_enabled():
+                    self._integrated_tor_asked[0] = True
+                    answer = window.question(
+                        _('CashFusion requires Tor to operate anonymously. Would'
+                          ' you like to enable the integrated Tor client now?'),
+                        icon = icon_fusion_logo.pixmap(32),
+                        title = _("Tor Required"),
+                        parent = None,
+                        app_modal = True,
+                        rich_text = True,
+                        defaultButton = QMessageBox.Yes
+                    )
+                    if answer:
+                        def on_status(controller):
+                            try: network.tor_controller.status_changed.remove(on_status)  # remove the callback immediately
+                            except ValueError: pass
+                            if controller.status == controller.Status.STARTED:
+                                window.show_message(
+                                    _('The integrated Tor client has been successfully started.'),
+                                    detail_text = (
+                                        _("The integrated Tor client can be stopped at any time from the Network Settings -> Proxy Tab"
+                                          ", however CashFusion does require Tor in order to operate correctly.")
+                                    ),
+                                    rich_text = True
+                                )
+                            else:
+                                window.show_error(_('There was an error starting the integrated Tor client'))
+                        network.tor_controller.status_changed.append(on_status)
+                        network.tor_controller.set_enabled(True)
+        self._integrated_tor_asked[1] = t = QTimer()
+        # if in 5 seconds no tor port, ask user if they want to enable the integrated Tor
+        t.timeout.connect(chk_tor_ok)
+        t.setSingleShot(True)
+        t.start(5000)
 
 
 class PasswordDialog(WindowModalDialog):

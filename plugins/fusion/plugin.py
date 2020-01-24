@@ -193,6 +193,7 @@ class FusionPlugin(BasePlugin):
     def on_close(self,):
         super().on_close()
         self.stop_testserver()
+        self.active = False
 
     def fullname(self):
         return 'CashFusion'
