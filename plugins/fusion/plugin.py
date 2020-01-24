@@ -191,6 +191,7 @@ class FusionPlugin(BasePlugin):
         self.lock = threading.RLock() # always order: plugin.lock -> wallet.lock -> fusion.lock
 
     def on_close(self,):
+        super().on_close()
         self.stop_testserver()
 
     def fullname(self):

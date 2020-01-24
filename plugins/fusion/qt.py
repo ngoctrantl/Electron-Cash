@@ -37,6 +37,7 @@ class Plugin(FusionPlugin):
     utilwin = None
     settingswin = None
     initted = False
+    active = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs) # gives us self.config
@@ -71,7 +72,7 @@ class Plugin(FusionPlugin):
         # any other plugin is initialized after us.
         if self.initted:
             return
-        self.initted = True
+        self.initted = self.active = True
         self.gui = gui
 
         # We also have to find which windows are already open, and make
@@ -132,22 +133,23 @@ class Plugin(FusionPlugin):
         want_autofuse = wallet.storage.get('cashfusion_autofuse', False)
         self.add_wallet(wallet, window.gui_object.get_cached_password(wallet))
 
-        if want_autofuse and not self.is_autofusing(wallet):
-            def callback(password):
-                self.enable_autofusing(wallet, password)
-                button = window._cashfusion_button()
-                button.update_state()
-            d = PasswordDialog(wallet, _("Previously you had auto-fusion enabled on this wallet. If you would like to keep auto-fusing in the background, enter your password."),
-                               callback_ok = callback)
-            d.show()
-            self.widgets.add(d)
-
         # bit of a dirty hack, to insert our status bar icon (always using index 4, should put us just after the password-changer icon)
         sb = window.statusBar()
         sbbtn = FusionButton(self, wallet)
         sb.insertPermanentWidget(4, sbbtn)
         self.widgets.add(sbbtn)
         window._cashfusion_button = weakref.ref(sbbtn)
+
+        # prompt for password if auto-fuse was enabled
+        if want_autofuse and not self.is_autofusing(wallet):
+            def callback(password):
+                self.enable_autofusing(wallet, password)
+                button = window._cashfusion_button()
+                if button: button.update_state()
+            d = PasswordDialog(wallet, _("Previously you had auto-fusion enabled on this wallet. If you would like to keep auto-fusing in the background, enter your password."),
+                               callback_ok = callback)
+            d.show()
+            self.widgets.add(d)
 
     @hook
     def on_close_window(self, window):
@@ -336,7 +338,7 @@ class PasswordDialog(WindowModalDialog):
             self.pwle.setFocus()
 
     def closeEvent(self, event):
-        super().closeEvent(self)
+        super().closeEvent(event)
         if event.isAccepted():
             if not self.result() and self.callback_cancel:
                 self.callback_cancel(self)
@@ -392,20 +394,21 @@ class FusionButton(StatusBarButton):
             self.setToolTip(_('CashFusion is paused'))
 
     def toggle_autofuse(self):
-        autofuse = self.plugin.is_autofusing(self.wallet)
+        plugin = self.plugin
+        autofuse = plugin.is_autofusing(self.wallet)
         if not autofuse:
             has_pw, password = Plugin.get_cached_pw(self.wallet)
             if has_pw and password is None:
                 # Fixme: See if we can not use a blocking password dialog here.
                 password = PasswordDialog(self.wallet, _("To perform auto-fusing in the background, please enter your password.")).run()
-                if password is None:
+                if password is None or not plugin.active:  # must check plugin.active because user can theoretically kill plugin from another window while the above password dialog is up
                     return
             try:
-                self.plugin.enable_autofusing(self.wallet, password)
+                plugin.enable_autofusing(self.wallet, password)
             except InvalidPassword:
                 ''' Somehow the password changed from underneath us. Silenty ignore. '''
         else:
-            running = self.plugin.disable_autofusing(self.wallet)
+            running = plugin.disable_autofusing(self.wallet)
             if running:
                 res = QMessageBox.question(Plugin.get_suitable_dialog_window_parent(self.wallet),
                                            _("Disabling automatic Cash Fusions"),
