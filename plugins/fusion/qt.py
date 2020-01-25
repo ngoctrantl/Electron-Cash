@@ -341,6 +341,7 @@ class Plugin(FusionPlugin):
                                     # them to the Tor settings (in Proxy tab)
                                     self.gui.show_network_dialog(window, jumpto='tor')
                             else:
+                                controller.set_enabled(False)  # latch it back to False so we may prompt them again in the future
                                 window.show_error(_('There was an error starting the integrated Tor client'))
                         network.tor_controller.status_changed.append(on_status)
                         network.tor_controller.set_enabled(True)
