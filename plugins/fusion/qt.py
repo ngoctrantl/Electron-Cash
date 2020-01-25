@@ -20,6 +20,7 @@ from electroncash_gui.qt.main_window import ElectrumWindow, StatusBarButton
 from electroncash_gui.qt.util import (
     Buttons, CancelButton, CloseButton, EnterButton, HelpLabel, OkButton,
     WaitingDialog, WindowModalDialog)
+from electroncash_gui.qt.utils import PortValidator, UserPortValidator
 
 from .fusion import can_fuse_from, can_fuse_to, DEFAULT_SELF_FUSE
 from .server import FusionServer, Params
@@ -558,7 +559,9 @@ class SettingsWidget(QWidget):
         hbox.addWidget(QLabel(_("P:")))
         self.le_server_port = QLineEdit()
         self.le_server_port.setMaximumWidth(50)
+        self.le_server_port.setValidator(PortValidator(self.le_server_port))
         self.le_server_port.textEdited.connect(self.user_changed_server)
+
         hbox.addWidget(self.le_server_port)
         self.cb_server_ssl = QCheckBox(_('SSL'))
         self.cb_server_ssl.clicked.connect(self.user_changed_server)
@@ -572,7 +575,7 @@ class SettingsWidget(QWidget):
         hbox.addWidget(QLabel(_("P:")))
         self.le_tor_port = QLineEdit()
         self.le_tor_port.setMaximumWidth(50)
-        self.le_tor_port.setValidator(QIntValidator(0, 65535))
+        self.le_tor_port.setValidator(UserPortValidator(self.le_tor_port))
         self.le_tor_port.textEdited.connect(self.user_edit_torport)
         hbox.addWidget(self.le_tor_port)
         self.l_tor_status = QLabel()

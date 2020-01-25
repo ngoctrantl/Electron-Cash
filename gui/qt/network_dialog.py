@@ -488,9 +488,7 @@ class NetworkChoiceLayout(QObject, PrintError):
         self.tor_socks_port.editingFinished.connect(self.set_tor_socks_port)
         self.tor_socks_port.setText(str(self.network.tor_controller.get_socks_port()))
         self.tor_socks_port.setToolTip(custom_port_tooltip)
-        port_validator = UserPortValidator(self.tor_socks_port)
-        port_validator.stateChanged.connect(UserPortValidator.setRedBorder)
-        self.tor_socks_port.setValidator(port_validator)
+        self.tor_socks_port.setValidator(UserPortValidator(self.tor_socks_port, accept_zero=True))
         self.tor_socks_port.setEnabled(self.tor_custom_port_cb.isChecked())
 
         # Start integrated Tor
