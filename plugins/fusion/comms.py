@@ -11,6 +11,7 @@ from google.protobuf.message import DecodeError
 
 from weakref import WeakSet
 
+from electroncash import networks
 from electroncash.util import PrintError
 
 # Make a small patch to the generated protobuf:
@@ -73,6 +74,18 @@ def recv_pb(connection, pb_class, *expected_field_names, timeout=None):
 
     return submsg, mtype
 
+_last_net = None
+_last_genesis_hash = None
+def get_current_genesis_hash() -> bytes:
+    '''Returns the genesis_hash of this Electron Cash install's current chain.
+    Note that it detects if the chain has changed, and otherwise caches the raw
+    32-bytes value.  This is suitable for putting into the ClientHello message.
+    Both server and client call this function.'''
+    global _last_net, _last_genesis_hash
+    if not _last_genesis_hash or _last_net != networks.net:
+        _last_genesis_hash = bytes(reversed(bytes.fromhex(networks.net.GENESIS)))
+        _last_net = networks.net
+    return _last_genesis_hash
 
 # Below stuff is used in the test server
 
@@ -92,6 +105,14 @@ class ClientHandlerThread(threading.Thread, PrintError):
         self.connection = connection
         self.dead = False
         self.jobs = queue.Queue()
+        self.peername = None
+
+    def diagnostic_name(self):
+        if self.peername is None and self.connection and self.connection.socket:
+            try: self.peername = ':'.join(str(x) for x in self.connection.socket.getpeername())
+            except: pass  # on some systems socket.getpeername() is not supported
+        peername = self.peername or '???'
+        return f'Client {peername}'
 
     def addjob(self, job, *args):
         try:
@@ -243,7 +264,9 @@ class GenericServer(threading.Thread, PrintError):
                         sock.close()
                         break
                     if self.noisy:
-                        self.print_error(f'new client: {src[0]}')
+                        srcstr = ':'.join(str(x) for x in src)
+                        self.print_error(f'new client: {srcstr}')
+                        del srcstr
                     connection = Connection(sock, self.client_default_timeout)
                     client = self.clientclass(connection)
                     client.noisy = self.noisy

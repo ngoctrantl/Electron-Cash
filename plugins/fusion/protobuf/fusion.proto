@@ -51,7 +51,8 @@ message Proof {
 
 message ClientHello { // from client
     required bytes version = 1;
-    }
+    optional bytes genesis_hash = 2; // 32 byte hash (bitcoind little-endian memory order)
+}
 
 message ServerHello { // from server
     repeated uint64 tiers = 1;

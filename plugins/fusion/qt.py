@@ -910,23 +910,23 @@ class UtilWindow(QDialog):
         super().__init__(parent=None)
         self.plugin = plugin
 
-        self.setWindowTitle("CashFusion - Fusions")
+        self.setWindowTitle(_("CashFusion - Fusions"))
         self.setWindowIcon(icon_fusion_logo)
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
-        clientbox = QGroupBox("Fusions")
+        clientbox = QGroupBox(_("Fusions"))
         main_layout.addWidget(clientbox)
 
-        self.serverbox = QGroupBox("Test server")
+        self.serverbox = QGroupBox(_("Server"))
         main_layout.addWidget(self.serverbox)
 
         clayout = QVBoxLayout()
         clientbox.setLayout(clayout)
 
         self.t_active_fusions = QTreeWidget()
-        self.t_active_fusions.setHeaderLabels(['wallet','status','status_ext'])
+        self.t_active_fusions.setHeaderLabels([_('Wallet'), _('Status'), _('Status Extra')])
         self.t_active_fusions.setContextMenuPolicy(Qt.CustomContextMenu)
         self.t_active_fusions.customContextMenuRequested.connect(self.create_menu_active_fusions)
         self.t_active_fusions.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -943,9 +943,10 @@ class UtilWindow(QDialog):
         self.t_server_waiting = QTableWidget()
         self.t_server_waiting.setColumnCount(3)
         self.t_server_waiting.setRowCount(len(Params.tiers))
-        self.t_server_waiting.setHorizontalHeaderLabels(['Tier (sats)','Num players', ''])
+        self.t_server_waiting.setHorizontalHeaderLabels([_('Tier (sats)'), _('Num players'), ''])
         for i, t in enumerate(Params.tiers):
-            button = QPushButton("Start")
+            button = QPushButton(_("Start"))
+            button.setDefault(False); button.setAutoDefault(False)  # on some platforms if we don't do this, one of the buttons traps "Enter" key
             button.clicked.connect(partial(self.clicked_start_fuse, t))
             self.t_server_waiting.setCellWidget(i, 2, button)
         slayout.addWidget(self.t_server_waiting)
@@ -958,14 +959,14 @@ class UtilWindow(QDialog):
 
         self.update_status()
 
-        self.resize(520, 240)  # TODO: Have this somehow not be hard-coded
+        self.resize(520, 240 if not self.plugin.testserver else 480)  # TODO: Have this somehow not be hard-coded
 
         self.show()
 
     def update_status(self):
         self.update_fusions()
         if self.plugin.testserver:
-            self.l_server_status.setText(f'Test server status: ACTIVE {self.plugin.testserver.host}:{self.plugin.testserver.port}')
+            self.l_server_status.setText(_('Server status: ACTIVE') + f' {self.plugin.testserver.host}:{self.plugin.testserver.port}')
             table = self.t_server_waiting
             table.setRowCount(len(self.plugin.testserver.waiting_pools))
             for i,(t,pool) in enumerate(self.plugin.testserver.waiting_pools.items()):
@@ -1009,7 +1010,7 @@ class UtilWindow(QDialog):
         menu = QMenu()
         def cancel():
             for fusion in fusions:
-                fusion.stop('Stop requested by user')
+                fusion.stop(_('Stop requested by user'))
         if has_live:
             if 'running' in statuses:
                 msg = _('Cancel (at end of round)')

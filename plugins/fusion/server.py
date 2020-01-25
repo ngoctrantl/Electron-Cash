@@ -5,15 +5,15 @@ A basic server implementation for testing. Does not include DoS preventions nor 
 import socket, threading, time, sys, traceback, secrets
 from collections import defaultdict
 
-from .comms import send_pb, recv_pb, ClientHandlerThread, GenericServer
+from .comms import send_pb, recv_pb, ClientHandlerThread, GenericServer, get_current_genesis_hash
 from .util import FusionError, sha256, calc_initial_hash, calc_round_hash, size_of_input, size_of_output, component_fee, dust_limit, gen_keypair, tx_from_components, rand_position
 from . import fusion_pb2 as pb
 from . import pedersen
 from .validation import check_playercommit, check_covert_component, validate_blame, ValidationError, check_input_electrumx
 from .protocol import Protocol
 
-from electroncash.util import PrintError, ServerErrorResponse
 import electroncash.schnorr as schnorr
+from electroncash.util import PrintError, ServerErrorResponse
 
 from google.protobuf.message import DecodeError
 
@@ -269,6 +269,17 @@ class FusionServer(GenericServer):
         msg = client.recv('clienthello')
         if msg.version != Protocol.VERSION:
             client.error("Mismatched protocol version, please upgrade")
+
+        if msg.genesis_hash:
+            if msg.genesis_hash != get_current_genesis_hash():
+                # For now, msg.genesis_hash is optional and we tolerate it
+                # missing. However, if the client declares the genesis_hash, we
+                # do indeed disallow them connecting if they are e.g. on testnet
+                # and we are mainnet, etc.
+                client.error("This server is on a different chain, please switch servers")
+        else:
+            client.print_error("👀 No genesis hash declared by client, we'll let them slide...")
+
 
         if self.stopping:
             return

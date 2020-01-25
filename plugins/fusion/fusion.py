@@ -17,7 +17,7 @@ from electroncash.wallet import Abstract_Wallet, Standard_Wallet, ImportedWallet
 from . import encrypt
 from . import fusion_pb2 as pb
 from . import pedersen
-from .comms import open_connection, send_pb, recv_pb
+from .comms import open_connection, send_pb, recv_pb, get_current_genesis_hash
 from .covert import CovertSubmitter, is_tor_port
 from .protocol import Protocol
 from .util import FusionError, sha256, calc_initial_hash, calc_round_hash, size_of_input, size_of_output, component_fee, dust_limit, gen_keypair, tx_from_components, rand_position
@@ -458,7 +458,7 @@ class Fusion(threading.Thread, PrintError):
 
     def greet(self,):
         self.print_error('greeting server')
-        self.send(pb.ClientHello(version=Protocol.VERSION))
+        self.send(pb.ClientHello(version=Protocol.VERSION, genesis_hash=get_current_genesis_hash()))
         reply = self.recv('serverhello')
         self.num_components = reply.num_components
         self.component_feerate = reply.component_feerate
