@@ -304,14 +304,26 @@ class Plugin(FusionPlugin):
                             try: network.tor_controller.status_changed.remove(on_status)  # remove the callback immediately
                             except ValueError: pass
                             if controller.status == controller.Status.STARTED:
-                                window.show_message(
+                                buttons = [ _('Settings...'), _('Ok') ]
+                                index = window.show_message(
                                     _('The integrated Tor client has been successfully started.'),
                                     detail_text = (
                                         _("The integrated Tor client can be stopped at any time from the Network Settings -> Proxy Tab"
                                           ", however CashFusion does require Tor in order to operate correctly.")
                                     ),
-                                    rich_text = True
+                                    rich_text = True,
+                                    buttons = buttons,
+                                    defaultButton = buttons[1],
+                                    escapeButton = buttons[1]
                                 )
+                                if index == 0:
+                                    # They want to go to settings... so
+                                    # INNUNDATE them with settings by opening up
+                                    # both Network and CashSusion settings.
+                                    # "Hey we heard you like settings so we got
+                                    # some settings to go with your settings!"
+                                    self.gui.show_network_dialog(window, jumpto='tor')
+                                    self.show_settings_dialog()
                             else:
                                 window.show_error(_('There was an error starting the integrated Tor client'))
                         network.tor_controller.status_changed.append(on_status)

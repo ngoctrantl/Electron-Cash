@@ -62,6 +62,9 @@ class NetworkDialog(MessageBoxMixin, QDialog):
         self.workaround_timer.setSingleShot(True)
         network.register_callback(self.on_network, ['blockchain_updated', 'interfaces', 'status'])
 
+    def jumpto(self, location : str):
+        self.nlayout.jumpto(location)
+
     def on_network(self, event, *args):
         ''' This may run in network thread '''
         #print_error("[NetworkDialog] on_network:",event,*args)
@@ -324,7 +327,7 @@ class NetworkChoiceLayout(QObject, PrintError):
         self.td.found_proxy.connect(self.suggest_proxy)
 
         self.tabs = tabs = QTabWidget()
-        server_tab = QWidget()
+        self.server_tab = server_tab = QWidget()
         weakTd = Weak.ref(self.td)
         class ProxyTab(QWidget):
             def showEvent(slf, e):
@@ -337,8 +340,8 @@ class NetworkChoiceLayout(QObject, PrintError):
                 td = weakTd()
                 if e.isAccepted() and td:
                     td.stop() # stops the tor detector when proxy_tab disappears
-        proxy_tab = ProxyTab()
-        blockchain_tab = QWidget()
+        self.proxy_tab = proxy_tab = ProxyTab()
+        self.blockchain_tab = blockchain_tab = QWidget()
         tabs.addTab(blockchain_tab, _('Overview'))
         tabs.addTab(server_tab, _('Server'))
         tabs.addTab(proxy_tab, _('Proxy'))
@@ -552,6 +555,19 @@ class NetworkChoiceLayout(QObject, PrintError):
 
         self.fill_in_proxy_settings()
         self.update()
+
+    def jumpto(self, location : str):
+        if not isinstance(location, str):
+            return
+        location = location.strip().lower()
+        if location in ('proxy', 'tor'):
+            self.tabs.setCurrentWidget(self.proxy_tab)
+        elif location in ('servers', 'server'):
+            self.tabs.setCurrentWidget(self.server_tab)
+        elif location in ('blockchain', 'overview', 'main'):
+            self.tabs.setCurrentWidget(self.blockchain_tab)
+        else:
+            self.print_error(f"jumpto: unknown location '{location}'")
 
     def on_tor_port_changed(self, controller: TorController):
         if not controller.active_socks_port or not controller.is_enabled() or not self.tor_use:
