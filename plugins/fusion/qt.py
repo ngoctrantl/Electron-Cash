@@ -442,10 +442,12 @@ class FusionButton(StatusBarButton):
         self.action_toggle.setChecked(autofuse)
         if autofuse:
             self.setIcon(self.icon_autofusing_on)
-            self.setToolTip(_('CashFusion is fusing in the background'))
+            self.setToolTip(_('CashFusion is fusing in the background for this wallet'))
+            self.setStatusTip(_('CashFusion Auto-fusion - Enabled'))
         else:
             self.setIcon(self.icon_autofusing_off)
-            self.setToolTip(_('CashFusion is paused'))
+            self.setToolTip(_('Auto-fusion is paused for this wallet (click to enable)'))
+            self.setStatusTip(_('CashFusion Auto-fusion - Disabled (click to enable)'))
 
     def toggle_autofuse(self):
         plugin = self.plugin
@@ -454,7 +456,7 @@ class FusionButton(StatusBarButton):
             has_pw, password = Plugin.get_cached_pw(self.wallet)
             if has_pw and password is None:
                 # Fixme: See if we can not use a blocking password dialog here.
-                password = PasswordDialog(self.wallet, _("To perform auto-fusing in the background, please enter your password.")).run()
+                password = PasswordDialog(self.wallet, _("To perform auto-fusion in the background, please enter your password.")).run()
                 if password is None or not plugin.active:  # must check plugin.active because user can theoretically kill plugin from another window while the above password dialog is up
                     return
             try:
