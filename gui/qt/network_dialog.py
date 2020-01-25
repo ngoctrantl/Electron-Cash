@@ -35,6 +35,7 @@ from electroncash.i18n import _, pgettext
 from electroncash import networks
 from electroncash.util import print_error, Weak, PrintError
 from electroncash.network import serialize_server, deserialize_server, get_eligible_servers
+from electroncash.plugins import run_hook
 from electroncash.tor import TorController
 
 from .util import *
@@ -53,7 +54,10 @@ class NetworkDialog(MessageBoxMixin, QDialog):
         self.nlayout = NetworkChoiceLayout(self, network, config)
         vbox = QVBoxLayout(self)
         vbox.addLayout(self.nlayout.layout())
-        vbox.addLayout(Buttons(CloseButton(self)))
+        # We don't want the close button's behavior to have the enter key close
+        # the window because user may edit text fields, etc, so we do the below:
+        close_but = CloseButton(self); close_but.setDefault(False); close_but.setAutoDefault(False)
+        vbox.addLayout(Buttons(close_but))
         self.network_updated_signal.connect(self.on_update)
         # below timer is to work around Qt on Linux display glitches when
         # showing this window.
@@ -566,7 +570,7 @@ class NetworkChoiceLayout(QObject, PrintError):
             self.tabs.setCurrentWidget(self.server_tab)
         elif location in ('blockchain', 'overview', 'main'):
             self.tabs.setCurrentWidget(self.blockchain_tab)
-        else:
+        elif not run_hook('on_network_dialog_jumpto', self, location):
             self.print_error(f"jumpto: unknown location '{location}'")
 
     def on_tor_port_changed(self, controller: TorController):

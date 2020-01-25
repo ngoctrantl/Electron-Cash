@@ -35,7 +35,7 @@ icon_fusion_logo_gray = QIcon(str(heredir / 'Cash Fusion Logo - No Text Gray.svg
 
 class Plugin(FusionPlugin):
     utilwin = None
-    settingswin = None
+    weak_settings_tab = None
     gui = None
     initted = False
 
@@ -64,7 +64,7 @@ class Plugin(FusionPlugin):
                 pass
         # clean up member attributes to be tidy
         self.utilwin = None  # should trigger a deletion of object if not already dead
-        self.settingswin = None  # again, same
+        self.weak_settings_tab = None
         self.gui = None
         self.initted = False
 
@@ -76,6 +76,10 @@ class Plugin(FusionPlugin):
             return
         self.initted = self.active = True  # self.active is declared in super
         self.gui = gui
+        if self.gui.nd:
+            # since a network dialog already exists, let's create the settings
+            # tab now.
+            self.on_network_dialog(self.gui.nd)
 
         # We also have to find which windows are already open, and make
         # them work with fusion.
@@ -115,6 +119,7 @@ class Plugin(FusionPlugin):
             if has_pw and password is None:
                 d = PasswordDialog(wallet, _("Enter your password to fuse these coins"), do_it)
                 d.show()
+                self.widgets.add(d)
             else:
                 do_it(password)
 
@@ -205,13 +210,25 @@ class Plugin(FusionPlugin):
         btn.clicked.connect(self.show_settings_dialog)
         return btn
 
-    def show_settings_dialog(self, ):
-        if self.settingswin is None:
-            # keep a singleton around
-            self.settingswin = SettingsDialog(self, self.config)
-            self.widgets.add(self.settingswin)
-        self.settingswin.show()
-        self.settingswin.raise_()
+    def show_settings_dialog(self):
+        self.gui.show_network_dialog(None, jumpto='fusion')
+
+    @hook
+    def on_network_dialog(self, network_dialog):
+        if self.weak_settings_tab and self.weak_settings_tab():
+            return  # already exists
+        settings_tab = SettingsWidget(self, self.config)
+        tabs = network_dialog.nlayout.tabs
+        tabs.addTab(settings_tab, icon_fusion_logo, _('CashFusion'))
+        self.widgets.add(settings_tab)
+        self.weak_settings_tab = weakref.ref(settings_tab)
+
+    @hook
+    def on_network_dialog_jumpto(self, nlayout, location):
+        settings_tab = self.weak_settings_tab and self.weak_settings_tab()
+        if settings_tab and location in ('fusion', 'cashfusion'):
+            nlayout.tabs.setCurrentWidget(settings_tab)
+            return True
 
     def update_coins_ui(self, wallet):
         ''' Overrides super, the Fusion thread calls this in its thread context
@@ -319,13 +336,9 @@ class Plugin(FusionPlugin):
                                     escapeButton = buttons[1]
                                 )
                                 if index == 0:
-                                    # They want to go to settings... so
-                                    # INNUNDATE them with settings by opening up
-                                    # both Network and CashSusion settings.
-                                    # "Hey we heard you like settings so we got
-                                    # some settings to go with your settings!"
+                                    # They want to go to "Settings..." so send
+                                    # them to the Tor settings (in Proxy tab)
                                     self.gui.show_network_dialog(window, jumpto='tor')
-                                    self.show_settings_dialog()
                             else:
                                 window.show_error(_('There was an error starting the integrated Tor client'))
                         network.tor_controller.status_changed.append(on_status)
@@ -406,12 +419,22 @@ class PasswordDialog(WindowModalDialog):
             self.pwle.setFocus()
 
     def closeEvent(self, event):
+        ''' This happens if .run() is called, then dialog is closed. '''
         super().closeEvent(event)
         if event.isAccepted():
-            if not self.result() and self.callback_cancel:
-                self.callback_cancel(self)
-            self.setParent(None)
-            self.deleteLater()
+            self._close_hide_common()
+
+    def hideEvent(self, event):
+        ''' This happens if .show() is called, then dialog is closed. '''
+        super().hideEvent(event)
+        if event.isAccepted():
+            self._close_hide_common()
+
+    def _close_hide_common(self):
+        if not self.result() and self.callback_cancel:
+            self.callback_cancel(self)
+        self.setParent(None)
+        self.deleteLater()
 
     def run(self):
         self.exec_()
@@ -470,7 +493,10 @@ class FusionButton(StatusBarButton):
             has_pw, password = Plugin.get_cached_pw(self.wallet)
             if has_pw and password is None:
                 # Fixme: See if we can not use a blocking password dialog here.
-                password = PasswordDialog(self.wallet, _("To perform auto-fusion in the background, please enter your password.")).run()
+                pd = PasswordDialog(self.wallet, _("To perform auto-fusion in the background, please enter your password."))
+                self.plugin.widgets.add(pd)  # just in case this plugin is unloaded while this dialog is up
+                password = pd.run()
+                del pd
                 if password is None or not plugin.active:  # must check plugin.active because user can theoretically kill plugin from another window while the above password dialog is up
                     return
             try:
@@ -494,23 +520,22 @@ class FusionButton(StatusBarButton):
         if not win:
             win = WalletSettingsDialog(Plugin.get_suitable_dialog_window_parent(self.wallet),
                                        self.plugin, self.wallet)
+            self.plugin.widgets.add(win)  # ensures if plugin is unloaded while dialog is up, that the dialog will be killed.
         win.show()
         win.raise_()
 
 
-class SettingsDialog(QDialog):
+class SettingsWidget(QWidget):
     torscanthread = None
     torscanthread_update = pyqtSignal(object)
 
-    def __init__(self, plugin, config):
-        super().__init__()
+    def __init__(self, plugin, config, parent=None):
+        super().__init__(parent)
         self.plugin = plugin
         self.config = config
         self.torscanthread_ping = threading.Event()
         self.torscanthread_update.connect(self.torport_update)
 
-        self.setWindowTitle(_("CashFusion - Settings"))
-        self.setWindowIcon(icon_fusion_logo)
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
@@ -555,21 +580,19 @@ class SettingsDialog(QDialog):
         self.b_tor_refresh = QPushButton()
         self.b_tor_refresh.clicked.connect(self.torscanthread_ping.set)
         self.b_tor_refresh.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.b_tor_refresh.setDefault(False); self.b_tor_refresh.setAutoDefault(False)
         hbox.addWidget(self.b_tor_refresh)
         self.cb_tor_auto = QCheckBox(_('autodetect'))
         self.cb_tor_auto.clicked.connect(self.cb_tor_auto_clicked)
         hbox.addWidget(self.cb_tor_auto)
 
-        btn = QPushButton(_("Fusions..."))
+        btn = QPushButton(_("Fusions...")); btn.setDefault(False); btn.setAutoDefault(False)
         btn.clicked.connect(self.plugin.show_util_window)
-        main_layout.addLayout(Buttons(btn, CloseButton(self)))
+        main_layout.addLayout(Buttons(btn))
+        main_layout.addStretch(1)
 
         self.pm_good_proxy = QIcon(":icons/status_connected_proxy.svg").pixmap(24)
         self.pm_bad_proxy = QIcon(":icons/status_disconnected.svg").pixmap(24)
-
-
-        self.update_server()
-        self.update_tor()
 
     def update_server(self):
         # called initially / when config changes
@@ -653,19 +676,30 @@ class SettingsDialog(QDialog):
         super().showEvent(event)
         if not event.isAccepted():
             return
+        self.update_server()
+        self.update_tor()
         if self.torscanthread is None:
             self.torscanthread = threading.Thread(name='Fusion-scan_torport_settings', target=self.scan_torport_loop)
             self.torscanthread.daemon = True
             self.torscanthread_stopping = False
             self.torscanthread.start()
 
+    def _hide_close_common(self):
+        self.torscanthread_stopping = True
+        self.torscanthread_ping.set()
+        self.torscanthread = None
+
     def closeEvent(self, event):
         super().closeEvent(event)
         if not event.isAccepted():
             return
-        self.torscanthread_stopping = True
-        self.torscanthread_ping.set()
-        self.torscanthread = None
+        self._hide_close_common()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if not event.isAccepted():
+            return
+        self._hide_close_common()
 
     def scan_torport_loop(self, ):
         while not self.torscanthread_stopping:
@@ -873,7 +907,7 @@ class WalletSettingsDialog(WindowModalDialog):
 
 class UtilWindow(QDialog):
     def __init__(self, plugin):
-        super().__init__(parent=plugin.settingswin)
+        super().__init__(parent=None)
         self.plugin = plugin
 
         self.setWindowTitle("CashFusion - Fusions")
