@@ -7,3 +7,5 @@ description = ''.join([
     _('In addition, a blame protocol is used to mitigate time-wasting denial-of-service type attacks.')
 ])
 available_for = ['qt', 'cmdline']
+# If default_on is set to True, this plugin is loaded by default on new installs
+default_on = True

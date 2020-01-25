@@ -116,7 +116,17 @@ class Plugins(DaemonThread):
             if not self.register_plugin(name, d):
                 continue
             self.internal_plugin_metadata[name] = d
-            if not d.get('requires_wallet_type') and self.config.get(INTERNAL_USE_PREFIX + name):
+            conf_key = INTERNAL_USE_PREFIX + name
+            conf_value = self.config.get(conf_key)
+            if conf_value is None and d.get('default_on'):
+                # An internal plugin wants to be on by default (default_on =
+                # True in its __init__.py). This only applies if no config value
+                # was specified for the plugin (e.g. a new install). If the user
+                # manually disabled the plugin, conf_value will be False (and
+                # not None), and this branch will not be taken.
+                conf_value = True
+                self.config.set_key(conf_key, conf_value)
+            if not d.get('requires_wallet_type') and conf_value:
                 try:
                     self.load_internal_plugin(name)
                 except BaseException as e:
