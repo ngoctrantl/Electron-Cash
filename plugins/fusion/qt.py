@@ -289,10 +289,11 @@ class Plugin(FusionPlugin):
                 network = self.gui.daemon.network
                 if network and not network.tor_controller.is_enabled():
                     self._integrated_tor_asked[0] = True
+                    icon_pm = icon_fusion_logo.pixmap(32)
                     answer = window.question(
                         _('CashFusion requires Tor to operate anonymously. Would'
                           ' you like to enable the integrated Tor client now?'),
-                        icon = icon_fusion_logo.pixmap(32),
+                        icon = icon_pm,
                         title = _("Tor Required"),
                         parent = None,
                         app_modal = True,
@@ -311,6 +312,7 @@ class Plugin(FusionPlugin):
                                         _("The integrated Tor client can be stopped at any time from the Network Settings -> Proxy Tab"
                                           ", however CashFusion does require Tor in order to operate correctly.")
                                     ),
+                                    icon = icon_pm,
                                     rich_text = True,
                                     buttons = buttons,
                                     defaultButton = buttons[1],
