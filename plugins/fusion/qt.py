@@ -541,7 +541,8 @@ class SettingsWidget(QWidget):
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
-        box = QGroupBox(_("Network")) ; main_layout.addWidget(box)
+        box = QGroupBox(_("Network"))
+        main_layout.addWidget(box, 0, Qt.AlignTop | Qt.AlignHCenter)
         slayout = QVBoxLayout() ; box.setLayout(slayout)
 
         grid = QGridLayout() ; slayout.addLayout(grid)
@@ -592,8 +593,22 @@ class SettingsWidget(QWidget):
 
         btn = QPushButton(_("Fusions...")); btn.setDefault(False); btn.setAutoDefault(False)
         btn.clicked.connect(self.plugin.show_util_window)
-        main_layout.addLayout(Buttons(btn))
+        buts = Buttons(btn)
+        buts.setAlignment(Qt.AlignRight | Qt.AlignTop)
+        main_layout.addLayout(buts)
+
         main_layout.addStretch(1)
+        self.stretch_item_index = main_layout.count()-1
+
+
+        self.server_widget = ServerWidget(self.plugin)
+        self.server_widget.layout().setContentsMargins(0,0,0,0)
+        main_layout.addWidget(self.server_widget)
+        self.timer_server_widget_visibility = QTimer(self.server_widget)
+        self.timer_server_widget_visibility.setSingleShot(False)
+        self.timer_server_widget_visibility.timeout.connect(self.update_server_widget_visibility)
+
+        self.server_widget_index = main_layout.count()-1
 
         self.pm_good_proxy = QIcon(":icons/status_connected_proxy.svg").pixmap(24)
         self.pm_bad_proxy = QIcon(":icons/status_disconnected.svg").pixmap(24)
@@ -676,12 +691,27 @@ class SettingsWidget(QWidget):
         self.torscanthread_ping.set()
         self.update_tor()
 
+    def refresh(self):
+        self.update_server()
+        self.update_tor()
+        self.update_server_widget_visibility()
+
+    def update_server_widget_visibility(self):
+        if not self.server_widget.is_server_running():
+            self.server_widget.setHidden(True)
+            self.layout().setStretch(self.stretch_item_index, 1)
+            self.layout().setStretch(self.server_widget_index, 0)
+        else:
+            self.server_widget.setHidden(False)
+            self.layout().setStretch(self.stretch_item_index, 0)
+            self.layout().setStretch(self.server_widget_index, 1)
+
     def showEvent(self, event):
         super().showEvent(event)
         if not event.isAccepted():
             return
-        self.update_server()
-        self.update_tor()
+        self.refresh()
+        self.timer_server_widget_visibility.start(2000)
         if self.torscanthread is None:
             self.torscanthread = threading.Thread(name='Fusion-scan_torport_settings', target=self.scan_torport_loop)
             self.torscanthread.daemon = True
@@ -689,6 +719,7 @@ class SettingsWidget(QWidget):
             self.torscanthread.start()
 
     def _hide_close_common(self):
+        self.timer_server_widget_visibility.stop()
         self.torscanthread_stopping = True
         self.torscanthread_ping.set()
         self.torscanthread = None
@@ -910,34 +941,53 @@ class WalletSettingsDialog(WindowModalDialog):
             self.update()
 
 
-class FusionsWindow(QDialog):
-    def __init__(self, plugin):
-        super().__init__(parent=None)
+class ServerFusionsBaseMixin:
+    def __init__(self, plugin, refresh_interval=2000):
+        assert isinstance(self, QWidget)
         self.plugin = plugin
+        self.refresh_interval = refresh_interval
 
-        self.setWindowTitle(_("CashFusion - Fusions"))
-        self.setWindowIcon(icon_fusion_logo)
+        self.timer_refresh = QTimer(self)
+        self.timer_refresh.setSingleShot(False)
+        self.timer_refresh.timeout.connect(self.refresh)
+
+    def _on_show(self):
+        self.timer_refresh.start(self.refresh_interval)
+        self.refresh()
+
+    def _on_hide(self):
+        self.timer_refresh.stop()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if event.isAccepted():
+            self._on_show()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if event.isAccepted():
+            self._on_hide()
+
+    def closeEvent(self, event):
+        super().closeEvent(event)
+        if event.isAccepted():
+            self._on_hide()
+
+    def refresh(self):
+        raise NotImplementedError('ServerFusionsBaseMixin refresh() needs an implementation')
+
+
+class ServerWidget(ServerFusionsBaseMixin, QWidget):
+    def __init__(self, plugin, parent=None):
+        QWidget.__init__(self, parent)
+        ServerFusionsBaseMixin.__init__(self, plugin)
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
-        clientbox = QGroupBox(_("Fusions"))
-        main_layout.addWidget(clientbox)
-
         self.serverbox = QGroupBox(_("Server"))
         main_layout.addWidget(self.serverbox)
-
-        clayout = QVBoxLayout()
-        clientbox.setLayout(clayout)
-
-        self.t_active_fusions = QTreeWidget()
-        self.t_active_fusions.setHeaderLabels([_('Wallet'), _('Status'), _('Status Extra')])
-        self.t_active_fusions.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.t_active_fusions.customContextMenuRequested.connect(self.create_menu_active_fusions)
-        self.t_active_fusions.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.t_active_fusions.itemDoubleClicked.connect(self.on_double_clicked)
-        clayout.addWidget(self.t_active_fusions)
-
+        #self.serverbox.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
         slayout = QVBoxLayout()
         self.serverbox.setLayout(slayout)
@@ -956,32 +1006,59 @@ class FusionsWindow(QDialog):
             self.t_server_waiting.setCellWidget(i, 2, button)
         slayout.addWidget(self.t_server_waiting)
 
+    def sizeHint(self):
+        return QSize(300, 150)
 
-        self.timer_status_update = QTimer(self)
-        self.timer_status_update.setSingleShot(False)
-        self.timer_status_update.timeout.connect(self.update_status)
-        self.timer_status_update.start(2000)
-
-        self.update_status()
-
-        self.resize(520, 240 if not self.plugin.testserver else 480)  # TODO: Have this somehow not be hard-coded
-
-        self.show()
-
-    def update_status(self):
-        self.update_fusions()
-        if self.plugin.testserver:
+    def refresh(self):
+        if self.is_server_running():
+            self.t_server_waiting.setEnabled(True)
             self.l_server_status.setText(_('Server status: ACTIVE') + f' {self.plugin.testserver.host}:{self.plugin.testserver.port}')
             table = self.t_server_waiting
             table.setRowCount(len(self.plugin.testserver.waiting_pools))
             for i,(t,pool) in enumerate(self.plugin.testserver.waiting_pools.items()):
                 table.setItem(i,0,QTableWidgetItem(str(t)))
                 table.setItem(i,1,QTableWidgetItem(str(len(pool.pool))))
-            self.serverbox.show()
         else:
-            self.serverbox.hide()
+            self.t_server_waiting.setEnabled(False)
+            self.l_server_status.setText(_('Server status: NOT RUNNING'))
 
-    def update_fusions(self):
+    def is_server_running(self):
+        return bool(self.plugin.testserver)
+
+    def clicked_start_fuse(self, tier, event):
+        if self.plugin.testserver is None:
+            return
+        self.plugin.testserver.start_fuse(tier)
+
+
+class FusionsWindow(ServerFusionsBaseMixin, QDialog):
+    def __init__(self, plugin):
+        QDialog.__init__(self, parent=None)
+        ServerFusionsBaseMixin.__init__(self, plugin, refresh_interval=1000)
+
+        self.setWindowTitle(_("CashFusion - Fusions"))
+        self.setWindowIcon(icon_fusion_logo)
+
+        main_layout = QVBoxLayout()
+        self.setLayout(main_layout)
+
+        clientbox = QGroupBox(_("Fusions"))
+        main_layout.addWidget(clientbox)
+
+        clayout = QVBoxLayout()
+        clientbox.setLayout(clayout)
+
+        self.t_active_fusions = QTreeWidget()
+        self.t_active_fusions.setHeaderLabels([_('Wallet'), _('Status'), _('Status Extra')])
+        self.t_active_fusions.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.t_active_fusions.customContextMenuRequested.connect(self.create_menu_active_fusions)
+        self.t_active_fusions.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.t_active_fusions.itemDoubleClicked.connect(self.on_double_clicked)
+        clayout.addWidget(self.t_active_fusions)
+
+        self.resize(520, 240)  # TODO: Have this somehow not be hard-coded
+
+    def refresh(self):
         tree = self.t_active_fusions
         reselect_fusions = set(i.data(0, Qt.UserRole)() for i in tree.selectedItems())
         reselect_fusions.discard(None)
@@ -1042,8 +1119,3 @@ class FusionsWindow(QDialog):
                 window.show_transaction(tx, wallet.get_label(txid))
             else:
                 window.show_error(_("Transaction not yet in wallet"))
-
-    def clicked_start_fuse(self, tier, event):
-        if self.plugin.testserver is None:
-            return
-        self.plugin.testserver.start_fuse(tier)
