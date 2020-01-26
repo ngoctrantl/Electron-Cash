@@ -1,4 +1,30 @@
 #!/usr/bin/env python3
+#
+# Electron Cash - a lightweight Bitcoin Cash client
+# CashFusion - an advanced coin anonymizer
+#
+# Copyright (C) 2020 Mark B. Lundeberg
+# Copyright (C) 2020 Calin A. Culianu
+#
+# Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this software and associated documentation files
+# (the "Software"), to deal in the Software without restriction,
+# including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software,
+# and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+# BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 import threading
 import time
 import weakref
@@ -1012,10 +1038,10 @@ class ServerWidget(ServerFusionsBaseMixin, QWidget):
     def refresh(self):
         if self.is_server_running():
             self.t_server_waiting.setEnabled(True)
-            self.l_server_status.setText(_('Server status: ACTIVE') + f' {self.plugin.testserver.host}:{self.plugin.testserver.port}')
+            self.l_server_status.setText(_('Server status: ACTIVE') + f' {self.plugin.fusion_server.host}:{self.plugin.fusion_server.port}')
             table = self.t_server_waiting
-            table.setRowCount(len(self.plugin.testserver.waiting_pools))
-            for i,(t,pool) in enumerate(self.plugin.testserver.waiting_pools.items()):
+            table.setRowCount(len(self.plugin.fusion_server.waiting_pools))
+            for i,(t,pool) in enumerate(self.plugin.fusion_server.waiting_pools.items()):
                 table.setItem(i,0,QTableWidgetItem(str(t)))
                 table.setItem(i,1,QTableWidgetItem(str(len(pool.pool))))
         else:
@@ -1023,12 +1049,12 @@ class ServerWidget(ServerFusionsBaseMixin, QWidget):
             self.l_server_status.setText(_('Server status: NOT RUNNING'))
 
     def is_server_running(self):
-        return bool(self.plugin.testserver)
+        return bool(self.plugin.fusion_server)
 
     def clicked_start_fuse(self, tier, event):
-        if self.plugin.testserver is None:
+        if self.plugin.fusion_server is None:
             return
-        self.plugin.testserver.start_fuse(tier)
+        self.plugin.fusion_server.start_fuse(tier)
 
 
 class FusionsWindow(ServerFusionsBaseMixin, QDialog):

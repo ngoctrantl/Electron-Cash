@@ -1,3 +1,30 @@
+#!/usr/bin/env python3
+#
+# Electron Cash - a lightweight Bitcoin Cash client
+# CashFusion - an advanced coin anonymizer
+#
+# Copyright (C) 2020 Mark B. Lundeberg
+# Copyright (C) 2020 Calin A. Culianu
+#
+# Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this software and associated documentation files
+# (the "Software"), to deal in the Software without restriction,
+# including without limitation the rights to use, copy, modify, merge,
+# publish, distribute, sublicense, and/or sell copies of the Software,
+# and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+# BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+# ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 """
 Base plugin (non-GUI)
 """
@@ -176,7 +203,7 @@ def select_random_coins(wallet, eligible, balance, max_coins):
 
 
 class FusionPlugin(BasePlugin):
-    testserver = None
+    fusion_server = None
     active = True
     _run_iter = 0
 
@@ -192,7 +219,7 @@ class FusionPlugin(BasePlugin):
 
     def on_close(self,):
         super().on_close()
-        self.stop_testserver()
+        self.stop_fusion_server()
         self.active = False
 
     def fullname(self):
@@ -328,7 +355,7 @@ class FusionPlugin(BasePlugin):
         assert can_fuse_to(target_wallet)
         host, port, ssl = self.get_server()
         if host == 'localhost':
-            # as a special exemption for the local test server, we don't use Tor.
+            # as a special exemption for the local fusion server, we don't use Tor.
             torhost = None
             torport = None
         else:
@@ -411,17 +438,17 @@ class FusionPlugin(BasePlugin):
                             for f in wallet._fusions_auto:
                                 f.stop('Wallet has unconfirmed coins... waiting.', not_if_running = True)
 
-    def start_testserver(self, network, bindhost, port, upnp = None):
-        if self.testserver:
+    def start_fusion_server(self, network, bindhost, port, upnp = None):
+        if self.fusion_server:
             raise RuntimeError("server already running")
-        self.testserver = FusionServer(self.config, network, bindhost, port, upnp = upnp)
-        self.testserver.start()
-        return self.testserver.host, self.testserver.port
+        self.fusion_server = FusionServer(self.config, network, bindhost, port, upnp = upnp)
+        self.fusion_server.start()
+        return self.fusion_server.host, self.fusion_server.port
 
-    def stop_testserver(self):
+    def stop_fusion_server(self):
         try:
-            self.testserver.stop('server stopped by operator')
-            self.testserver = None
+            self.fusion_server.stop('server stopped by operator')
+            self.fusion_server = None
         except Exception:
             pass
 
@@ -432,17 +459,17 @@ class FusionPlugin(BasePlugin):
         freezes & unfreezes coins. '''
 
     @daemon_command
-    def fusion_test_server_start(self, daemon, config):
+    def fusion_server_start(self, daemon, config):
         # Usage:
-        #   ./electron-cash daemon fusion_test_server_start <bindhost> <port>
-        #   ./electron-cash daemon fusion_test_server_start <bindhost> <port> upnp
+        #   ./electron-cash daemon fusion_server_start <bindhost> <port>
+        #   ./electron-cash daemon fusion_server_start <bindhost> <port> upnp
         network = daemon.network
         if not network:
-            return "error: cannot run test server without electrumx connection"
+            return "error: cannot run fusion server without an SPV server connection"
         def invoke(bindhost = '0.0.0.0', sport='8787', upnp_str = None):
             port = int(sport)
             pnp = get_upnp() if upnp_str == 'upnp' else None
-            return self.start_testserver(network, bindhost, port, upnp = pnp)
+            return self.start_fusion_server(network, bindhost, port, upnp = pnp)
 
         try:
             host, port = invoke(*config.get('subargs', ()))
@@ -452,23 +479,23 @@ class FusionPlugin(BasePlugin):
         return (host, port)
 
     @daemon_command
-    def fusion_test_server_stop(self, daemon, config):
-        self.stop_testserver()
+    def fusion_server_stop(self, daemon, config):
+        self.stop_fusion_server()
         return 'ok'
 
     @daemon_command
-    def fusion_test_server_status(self, daemon, config):
-        if not self.testserver:
-            return "test server not running"
-        return dict(poolsizes = {t: len(pool.pool) for t,pool in self.testserver.waiting_pools.items()})
+    def fusion_server_status(self, daemon, config):
+        if not self.fusion_server:
+            return "fusion server not running"
+        return dict(poolsizes = {t: len(pool.pool) for t,pool in self.fusion_server.waiting_pools.items()})
 
     @daemon_command
-    def fusion_test_server_fuse(self, daemon, config):
-        if self.testserver is None:
+    def fusion_server_fuse(self, daemon, config):
+        if self.fusion_server is None:
             return
         subargs = config.get('subargs', ())
         if len(subargs) != 1:
             return "expecting tier"
         tier = int(subargs[0])
-        num_clients = self.testserver.start_fuse(tier)
+        num_clients = self.fusion_server.start_fuse(tier)
         return num_clients
