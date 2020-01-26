@@ -35,7 +35,7 @@ icon_fusion_logo = QIcon(str(heredir / 'Cash Fusion Logo - No Text.svg'))
 icon_fusion_logo_gray = QIcon(str(heredir / 'Cash Fusion Logo - No Text Gray.svg'))
 
 class Plugin(FusionPlugin):
-    utilwin = None
+    fusions_win = None
     weak_settings_tab = None
     gui = None
     initted = False
@@ -64,7 +64,7 @@ class Plugin(FusionPlugin):
                 # could be <RuntimeError: wrapped C/C++ object of type SettingsDialog has been deleted> but really we just want to suppress all exceptions
                 pass
         # clean up member attributes to be tidy
-        self.utilwin = None  # should trigger a deletion of object if not already dead
+        self.fusions_win = None  # should trigger a deletion of object if not already dead
         self.weak_settings_tab = None
         self.gui = None
         self.initted = False
@@ -195,12 +195,12 @@ class Plugin(FusionPlugin):
                 self.print_error(wallet, "disabled autofusion due to incorrect password - BUG")
 
     def show_util_window(self, ):
-        if self.utilwin is None:
+        if self.fusions_win is None:
             # keep a singleton around
-            self.utilwin = UtilWindow(self)
-            self.widgets.add(self.utilwin)
-        self.utilwin.show()
-        self.utilwin.raise_()
+            self.fusions_win = FusionsWindow(self)
+            self.widgets.add(self.fusions_win)
+        self.fusions_win.show()
+        self.fusions_win.raise_()
 
     def requires_settings(self):
         # called from main_window.py internal_plugins_dialog
@@ -909,7 +909,8 @@ class WalletSettingsDialog(WindowModalDialog):
         if event.isAccepted():
             self.update()
 
-class UtilWindow(QDialog):
+
+class FusionsWindow(QDialog):
     def __init__(self, plugin):
         super().__init__(parent=None)
         self.plugin = plugin
