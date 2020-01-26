@@ -43,10 +43,10 @@ import ecdsa
 
 # Internally used exceptions, shouldn't leak out of this plugin.
 class FusionError(Exception):
-    # This represents an "expected" type of error, having to do protocol errors
-    # and degraded conditions that cause a fusion round to fail.
-    # It should not be used to mask programming errors.
-    pass
+    '''This represents an "expected" type of error, having to do with protocol
+    errors and degraded conditions that cause a fusion round to fail. It should
+    not be used to mask programming errors.'''
+
 
 def sha256(x):
     return hashlib.sha256(x).digest()

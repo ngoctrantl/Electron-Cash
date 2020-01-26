@@ -379,6 +379,16 @@ class Fusion(threading.Thread, PrintError):
         if strong_plugin:
             strong_plugin.update_coins_ui(wallet)
 
+    def notify_server_status(self, b, tup=None):
+        '''True means server is good, False it's bad. This ultimately makes
+        its way to the UI to tell the user there is a connectivity or other
+        problem. '''
+        strong_plugin = self.weak_plugin and self.weak_plugin()
+        if strong_plugin:
+            if not isinstance(tup, (tuple, list)) or len(tup) != 2:
+                tup = "Ok" if b else "Error", ''
+            strong_plugin.notify_server_status(b, tup)
+
     def start(self, inactive_timeout = None):
         if inactive_timeout is None:
             self.inactive_time_limit = None
@@ -388,12 +398,12 @@ class Fusion(threading.Thread, PrintError):
         super().start()
 
     def run(self):
+        server_connected_and_greeted = False
         try:
-            if not (schnorr.has_fast_sign() and schnorr.has_fast_verify()):
-                raise FusionError("Fusion requires libsecp")
-            if not (self.tor_host is None or
-                    self.tor_port is None or
-                    is_tor_port(self.tor_host, self.tor_port)):
+            if not schnorr.has_fast_sign() or not schnorr.has_fast_verify():
+                raise FusionError("Fusion requires libsecp256k1")
+            if (self.tor_host is not None and self.tor_port is not None
+                    and not is_tor_port(self.tor_host, self.tor_port)):
                 raise FusionError(f"Can't connect to Tor proxy at {self.tor_host}:{self.tor_port}")
 
             self.check_coins()
@@ -402,12 +412,15 @@ class Fusion(threading.Thread, PrintError):
             self.status = ('connecting', '')
             try:
                 self.connection = open_connection(self.server_host, self.server_port, conn_timeout=5.0, default_timeout=5.0, ssl=self.server_ssl)
-            except OSError:
-                raise FusionError(f'Could not connect to {self.server_host}:{self.server_port}')
+            except OSError as e:
+                raise FusionError(f'Could not connect to {self.server_host}:{self.server_port}') from e
 
             with self.connection:
                 # Version check and download server params.
                 self.greet()
+
+                server_connected_and_greeted = True
+                self.notify_server_status(True)
 
                 # In principle we can hook a pause in here -- user can insert coins after seeing server params.
 
@@ -457,6 +470,8 @@ class Fusion(threading.Thread, PrintError):
             if self.status[0] != 'complete':
                 for amount, addr in self.outputs:
                     self.target_wallet.unreserve_change_address(addr)
+                if not server_connected_and_greeted:
+                    self.notify_server_status(False, self.status)
 
     def stop(self, reason = 'stopped', not_if_running = False):
         self.stop_reason = reason
@@ -494,9 +509,9 @@ class Fusion(threading.Thread, PrintError):
         self.available_tiers = tuple(reply.tiers)
 
         # Enforce some sensible limits, in case server is crazy
-        if (self.component_feerate > 5000):
+        if self.component_feerate > 5000:
             raise FusionError('excessive component feerate from server')
-        if (self.min_excess_fee > 400):
+        if self.min_excess_fee > 400:
             raise FusionError('excessive min excess fee from server')
 
     def allocate_outputs(self,):

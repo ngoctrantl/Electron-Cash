@@ -458,6 +458,11 @@ class FusionPlugin(BasePlugin):
         This is called by the Fusion thread (in its thread context) when it
         freezes & unfreezes coins. '''
 
+    def notify_server_status(self, b, tup : tuple = None):
+        ''' The Qt plugin subclass implements this to tell the GUI about bad
+        servers. '''
+        self.print_error("notify_server_status:", b, str(tup))
+
     @daemon_command
     def fusion_server_start(self, daemon, config):
         # Usage:

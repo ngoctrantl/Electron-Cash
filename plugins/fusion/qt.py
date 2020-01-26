@@ -60,14 +60,18 @@ heredir = Path(__file__).parent
 icon_fusion_logo = QIcon(str(heredir / 'Cash Fusion Logo - No Text.svg'))
 icon_fusion_logo_gray = QIcon(str(heredir / 'Cash Fusion Logo - No Text Gray.svg'))
 
-class Plugin(FusionPlugin):
+class Plugin(FusionPlugin, QObject):
+    server_status_changed_signal = pyqtSignal(bool, tuple)
+
     fusions_win = None
     weak_settings_tab = None
     gui = None
     initted = False
+    last_server_status = (True, ("Ok", ''))
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs) # gives us self.config
+        QObject.__init__(self)  # parentless top-level QObject. We need this type for the signal.
+        FusionPlugin.__init__(self, *args, **kwargs) # gives us self.config
         self.widgets = weakref.WeakSet() # widgets we made, that need to be hidden & deleted when plugin is disabled
 
     def on_close(self):
@@ -267,6 +271,14 @@ class Plugin(FusionPlugin):
                 strong_window.utxo_list.update()  # this is rate_limited so it's ok to call it many times in rapid succession.
 
         do_in_main_thread(update_coins_tab, wallet)
+
+    def notify_server_status(self, b, tup):
+        ''' Reimplemented from super '''
+        super().notify_server_status(b, tup)
+        status_tup = (b, tup)
+        if self.last_server_status != status_tup:
+            self.last_server_status = status_tup
+            self.server_status_changed_signal.emit(b, tup)
 
     @classmethod
     def window_for_wallet(cls, wallet):

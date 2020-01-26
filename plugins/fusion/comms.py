@@ -56,28 +56,28 @@ def send_pb(connection, pb_class, submsg, timeout=None):
     msgbytes = msg.SerializeToString()
     try:
         connection.send_message(msgbytes, timeout=timeout)
-    except ConnectionError:
-        raise FusionError('connection closed by remote')
-    except socket.timeout:
-        raise FusionError('timed out during send')
+    except ConnectionError as e:
+        raise FusionError('connection closed by remote') from e
+    except socket.timeout as e:
+        raise FusionError('timed out during send') from e
     except OSError as exc:
-        raise FusionError('Communications error: {}: {}'.format(type(exc).__name__, exc))
+        raise FusionError('Communications error: {}: {}'.format(type(exc).__name__, exc)) from exc
     # Other exceptions propagate up
 
 def recv_pb(connection, pb_class, *expected_field_names, timeout=None):
     try:
         blob = connection.recv_message(timeout = timeout)
-    except ConnectionError:
-        raise FusionError('connection closed by remote')
+    except ConnectionError as e:
+        raise FusionError('connection closed by remote') from e
     except BadFrameError as e:
-        raise FusionError('corrupted communication: ' + e.args[0])
-    except socket.timeout:
-        raise FusionError('timed out during receive')
+        raise FusionError('corrupted communication: ' + e.args[0]) from e
+    except socket.timeout as e:
+        raise FusionError('timed out during receive') from e
     except OSError as exc:
         if exc.errno == 9:
-            raise FusionError('connection closed by local')
+            raise FusionError('connection closed by local') from exc
         else:
-            raise FusionError('Communications error: {}: {}'.format(type(exc).__name__, exc))
+            raise FusionError('Communications error: {}: {}'.format(type(exc).__name__, exc)) from exc
     # Other exceptions propagate up
 
     msg = pb_class()
@@ -85,8 +85,8 @@ def recv_pb(connection, pb_class, *expected_field_names, timeout=None):
         length = msg.ParseFromString(blob)
         if length != len(blob):
             raise DecodeError
-    except DecodeError:
-        raise FusionError('message decoding error')
+    except DecodeError as e:
+        raise FusionError('message decoding error') from e
 
     if not msg.IsInitialized():
         raise FusionError('incomplete message received')
