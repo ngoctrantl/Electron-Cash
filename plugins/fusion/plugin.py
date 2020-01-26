@@ -364,6 +364,7 @@ class FusionPlugin(BasePlugin):
             if torport is None:
                 torport = self.scan_torport() # may block for a very short time ...
             if torport is None:
+                self.notify_server_status(False, ("failed", _("Invalid Tor proxy or no Tor proxy found")))
                 raise RuntimeError("can't find tor port")
         fusion = Fusion(self, target_wallet, host, port, ssl, torhost, torport)
         target_wallet._fusions.add(fusion)
@@ -461,7 +462,7 @@ class FusionPlugin(BasePlugin):
     def notify_server_status(self, b, tup : tuple = None):
         ''' The Qt plugin subclass implements this to tell the GUI about bad
         servers. '''
-        self.print_error("notify_server_status:", b, str(tup))
+        if not b: self.print_error("notify_server_status:", b, str(tup))
 
     @daemon_command
     def fusion_server_start(self, daemon, config):

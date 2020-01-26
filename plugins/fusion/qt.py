@@ -43,9 +43,10 @@ from electroncash.util import (
 from electroncash.wallet import Abstract_Wallet
 from electroncash_gui.qt.amountedit import BTCAmountEdit
 from electroncash_gui.qt.main_window import ElectrumWindow, StatusBarButton
+from electroncash_gui.qt.popup_widget import ShowPopupLabel, KillPopupLabel
 from electroncash_gui.qt.util import (
-    Buttons, CancelButton, CloseButton, EnterButton, HelpLabel, OkButton,
-    WaitingDialog, WindowModalDialog)
+    Buttons, CancelButton, CloseButton, ColorScheme, EnterButton, HelpLabel,
+    OkButton, WaitingDialog, WindowModalDialog)
 from electroncash_gui.qt.utils import PortValidator, UserPortValidator
 
 from .fusion import can_fuse_from, can_fuse_to, DEFAULT_SELF_FUSE
@@ -59,6 +60,7 @@ from pathlib import Path
 heredir = Path(__file__).parent
 icon_fusion_logo = QIcon(str(heredir / 'Cash Fusion Logo - No Text.svg'))
 icon_fusion_logo_gray = QIcon(str(heredir / 'Cash Fusion Logo - No Text Gray.svg'))
+image_red_exclamation = QImage(str(heredir / 'red_exclamation.png'))
 
 class Plugin(FusionPlugin, QObject):
     server_status_changed_signal = pyqtSignal(bool, tuple)
@@ -174,6 +176,7 @@ class Plugin(FusionPlugin, QObject):
         # bit of a dirty hack, to insert our status bar icon (always using index 4, should put us just after the password-changer icon)
         sb = window.statusBar()
         sbbtn = FusionButton(self, wallet)
+        self.server_status_changed_signal.connect(sbbtn.update_server_error)
         sb.insertPermanentWidget(4, sbbtn)
         self.widgets.add(sbbtn)
         window._cashfusion_button = weakref.ref(sbbtn)
@@ -249,6 +252,7 @@ class Plugin(FusionPlugin, QObject):
         if self.weak_settings_tab and self.weak_settings_tab():
             return  # already exists
         settings_tab = SettingsWidget(self, self.config)
+        self.server_status_changed_signal.connect(settings_tab.update_server_error)
         tabs = network_dialog.nlayout.tabs
         tabs.addTab(settings_tab, icon_fusion_logo, _('CashFusion'))
         self.widgets.add(settings_tab)
@@ -279,6 +283,12 @@ class Plugin(FusionPlugin, QObject):
         if self.last_server_status != status_tup:
             self.last_server_status = status_tup
             self.server_status_changed_signal.emit(b, tup)
+
+    def get_server_error(self) -> tuple:
+        ''' Returns a 2-tuple of strings for the last server error, or None
+        if there is no extant server error. '''
+        if not self.last_server_status[0]:
+            return self.last_server_status[1]
 
     @classmethod
     def window_for_wallet(cls, wallet):
@@ -488,6 +498,8 @@ class FusionButton(StatusBarButton):
         self.plugin = plugin
         self.wallet = wallet
 
+        self.server_error : tuple = None
+
         self.icon_autofusing_on = icon_fusion_logo
         self.icon_autofusing_off = icon_fusion_logo_gray
         self.icon_fusing_problem = self.style().standardIcon(QStyle.SP_MessageBoxWarning)
@@ -525,6 +537,27 @@ class FusionButton(StatusBarButton):
             self.setIcon(self.icon_autofusing_off)
             self.setToolTip(_('Auto-fusion is paused for this wallet (click to enable)'))
             self.setStatusTip(_('CashFusion Auto-fusion - Disabled (click to enable)'))
+        if self.server_error:
+            self.setToolTip(_('CashFusion') + ": " + ', '.join(self.server_error))
+            self.setStatusTip(_('CashFusion') + ": " + ', '.join(self.server_error))
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if event.isAccepted() and self.server_error:
+            # draw error overlay if we are in an error state
+            p = QPainter(self)
+            try:
+                p.setClipRegion(event.region())
+                r = self.rect()
+                r -= QMargins(4,6,4,6)
+                r.moveCenter(r.center() + QPoint(4,4))
+                p.drawImage(r, image_red_exclamation)
+            finally:
+                # paranoia. The above never raises but.. if it does.. PyQt will
+                # crash hard if we don't end the QPainter properly before
+                # returning.
+                p.end()
+                del p
 
     def toggle_autofuse(self):
         plugin = self.plugin
@@ -563,6 +596,39 @@ class FusionButton(StatusBarButton):
             self.plugin.widgets.add(win)  # ensures if plugin is unloaded while dialog is up, that the dialog will be killed.
         win.show()
         win.raise_()
+
+    def update_server_error(self):
+        tup = self.plugin.get_server_error()
+        changed = tup != self.server_error
+        if not changed:
+            return
+        self.server_error = tup
+        name = "CashFusionError;" + self.wallet.basename()
+        if self.server_error:
+            weak_plugin = weakref.ref(self.plugin)
+            def onClick():
+                KillPopupLabel(name)
+                plugin = weak_plugin()
+                if plugin:
+                    plugin.show_settings_dialog()
+            ShowPopupLabel(name = name,
+                           text="<center><b>{}</b><br><small>{}</small></center>".format(_("Server Error"),_("Right-click to resolve")),
+                           target=self,
+                           timeout=20000, onClick=onClick, onRightClick=onClick,
+                           dark_mode = ColorScheme.dark_scheme)
+        else:
+            KillPopupLabel(name)
+
+        self.update()  # causes a repaint
+
+        window = self.wallet.weak_window and self.wallet.weak_window()
+        if window:
+            window.print_error("CashFusion server_error is now {}".format(self.server_error))
+            oldTip = self.statusTip()
+            self.update_state()
+            newTip = self.statusTip()
+            if newTip != oldTip:
+                window.statusBar().showMessage(newTip, 7500)
 
 
 class SettingsWidget(QWidget):
@@ -607,8 +673,12 @@ class SettingsWidget(QWidget):
         self.cb_server_ssl.clicked.connect(self.user_changed_server)
         hbox.addWidget(self.cb_server_ssl)
 
-        grid.addWidget(QLabel(_("Tor")), 1, 0)
-        hbox = QHBoxLayout(); grid.addLayout(hbox, 1, 1)
+        self.server_error_label = QLabel()
+        self.server_error_label.setAlignment(Qt.AlignTop|Qt.AlignJustify)
+        grid.addWidget(self.server_error_label, 1, 0, 1, -1)
+
+        grid.addWidget(QLabel(_("Tor")), 2, 0)
+        hbox = QHBoxLayout(); grid.addLayout(hbox, 2, 1)
         self.le_tor_host = QLineEdit('localhost')
         self.le_tor_host.textEdited.connect(self.user_edit_torhost)
         hbox.addWidget(self.le_tor_host)
@@ -662,6 +732,14 @@ class SettingsWidget(QWidget):
         self.combo_server_host.setEditText(host)
         self.le_server_port.setText(str(port))
         self.cb_server_ssl.setChecked(ssl)
+
+    def update_server_error(self):
+        errtup = self.plugin.get_server_error()
+        self.server_error_label.setHidden(errtup is None)
+        if errtup:
+            color = ColorScheme.RED.get_html()
+            self.server_error_label.setText(f'<b>{errtup[0]}:</b> <font color="{color}"><i>{errtup[1]}</i></font>')
+
 
     def combo_server_activated(self, index):
         # only triggered when user selects a combo item
@@ -733,6 +811,7 @@ class SettingsWidget(QWidget):
         self.update_server()
         self.update_tor()
         self.update_server_widget_visibility()
+        self.update_server_error()
 
     def update_server_widget_visibility(self):
         if not self.server_widget.is_server_running():
