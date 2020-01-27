@@ -695,7 +695,7 @@ class SettingsWidget(QWidget):
         self.b_tor_refresh.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         self.b_tor_refresh.setDefault(False); self.b_tor_refresh.setAutoDefault(False)
         hbox.addWidget(self.b_tor_refresh)
-        self.cb_tor_auto = QCheckBox(_('autodetect'))
+        self.cb_tor_auto = QCheckBox(_('Autodetect'))
         self.cb_tor_auto.clicked.connect(self.cb_tor_auto_clicked)
         hbox.addWidget(self.cb_tor_auto)
 
@@ -876,7 +876,7 @@ class WalletSettingsDialog(WindowModalDialog):
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
-        box = QGroupBox(_("Auto-fusion coin selection")) ; main_layout.addWidget(box)
+        box = QGroupBox(_("Auto-Fusion Coin Selection")) ; main_layout.addWidget(box)
         slayout = QVBoxLayout() ; box.setLayout(slayout)
 
         grid = QGridLayout() ; slayout.addLayout(grid)
@@ -921,7 +921,7 @@ class WalletSettingsDialog(WindowModalDialog):
         slayout.addWidget(self.l_warn_selection)
         slayout.setAlignment(self.l_warn_selection, Qt.AlignCenter)
 
-        box = QGroupBox(_("Auto-fusion limits")) ; main_layout.addWidget(box)
+        box = QGroupBox(_("Auto-Fusion Limits")) ; main_layout.addWidget(box)
         slayout = QVBoxLayout() ; box.setLayout(slayout)
         grid = QGridLayout() ; slayout.addLayout(grid)
         grid.addWidget(QLabel(_("Number of queued fusions")), 0, 0)
@@ -929,14 +929,14 @@ class WalletSettingsDialog(WindowModalDialog):
         self.sb_queued_autofuse.setRange(1, 10)  # hard-coded rande 1-10, maybe have this come from some constants?
         self.sb_queued_autofuse.setMinimumWidth(50)  # just so it doesn't end up too tiny
         grid.addWidget(self.sb_queued_autofuse, 0, 1)
-        self.cb_autofuse_only_all_confirmed = QCheckBox(_("Only autofuse when all coins are confirmed"))
+        self.cb_autofuse_only_all_confirmed = QCheckBox(_("Only auto-fuse when all coins are confirmed"))
         slayout.addWidget(self.cb_autofuse_only_all_confirmed)
         grid.addWidget(QWidget(), 0, 2); grid.setColumnStretch(2, 1) # spacer
 
         self.sb_queued_autofuse.valueChanged.connect(self.edited_queued_autofuse)
         self.cb_autofuse_only_all_confirmed.clicked.connect(self.clicked_confirmed_only)
 
-        box = QGroupBox(_("Self-fusing")) ; main_layout.addWidget(box)
+        box = QGroupBox(_("Self-Fusing")) ; main_layout.addWidget(box)
         slayout = QVBoxLayout() ; box.setLayout(slayout)
 
         lbl = QLabel(_("Allow this wallet to participate multiply in the same fusion round?"))
