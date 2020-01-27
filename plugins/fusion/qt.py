@@ -603,7 +603,7 @@ class FusionButton(StatusBarButton):
         if not changed:
             return
         self.server_error = tup
-        name = "CashFusionError;" + self.wallet.basename()
+        name = "CashFusionError;" + str(id(self))  # make sure name is unique per FusionButton widget
         if self.server_error:
             weak_plugin = weakref.ref(self.plugin)
             def onClick():
@@ -612,7 +612,7 @@ class FusionButton(StatusBarButton):
                 if plugin:
                     plugin.show_settings_dialog()
             ShowPopupLabel(name = name,
-                           text="<center><b>{}</b><br><small>{}</small></center>".format(_("Server Error"),_("Right-click to resolve")),
+                           text="<center><b>{}</b><br><small>{}</small></center>".format(_("Server Error"),_("Click here to resolve")),
                            target=self,
                            timeout=20000, onClick=onClick, onRightClick=onClick,
                            dark_mode = ColorScheme.dark_scheme)

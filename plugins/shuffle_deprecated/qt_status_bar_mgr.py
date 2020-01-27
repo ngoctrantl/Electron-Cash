@@ -222,7 +222,7 @@ class ShuffleStatusBarButtonMgr:
                 KillPopupLabel("CashShuffleError")
                 self.show_cashshuffle_settings()
             ShowPopupLabel(name = "CashShuffleError",
-                           text="<center><b>{}</b><br><small>{}</small></center>".format(_("Server Error"),_("Right-click to resolve")),
+                           text="<center><b>{}</b><br><small>{}</small></center>".format(_("Server Error"),_("Click here to resolve")),
                            target=self.cashshuffle_status_button,
                            timeout=20000, onClick=onClick, onRightClick=onClick,
                            dark_mode = ColorScheme.dark_scheme)
