@@ -912,7 +912,7 @@ class WalletSettingsDialog(WindowModalDialog):
         self.radio_select_fraction.clicked.connect(self.sb_selector_fraction.setFocus)
         self.radio_select_count.clicked.connect(self.sb_selector_count.setFocus)
 
-        low_warn_blurb = _("Click for consolidation info")
+        low_warn_blurb = _("Click for consolidation tips")
         low_warn_blurb_link = '<a href="unused">' + low_warn_blurb + '</a>'
         self.l_warn_selection = QLabel("<center>" + low_warn_blurb_link + "</center>")
         self.l_warn_selection.setToolTip(low_warn_blurb)
