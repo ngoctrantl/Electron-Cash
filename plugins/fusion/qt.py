@@ -912,10 +912,14 @@ class WalletSettingsDialog(WindowModalDialog):
         self.radio_select_fraction.clicked.connect(self.sb_selector_fraction.setFocus)
         self.radio_select_count.clicked.connect(self.sb_selector_count.setFocus)
 
-        self.l_warn_selection = QLabel(_("Your target number of coins is low. In order to achieve the best consolidation, make sure that you have only 1 queued auto-fusion, and have 'self-fusing' set to 'No', and enable fusing only when all coins are confirmed."))
-        self.l_warn_selection.setWordWrap(True)
+        low_warn_blurb = _("Consolidation unlikely")
+        low_warn_blurb_link = '<a href="unused">' + _("Click here for more info") + '</a>'
+
+        self.l_warn_selection = QLabel("<center>" + low_warn_blurb + "<br/>" + low_warn_blurb_link + "</center>")
+        self.l_warn_selection.setToolTip(_("Click for help on consolidation"))
+        self.l_warn_selection.linkActivated.connect(self._show_low_warn_help)
         self.l_warn_selection.setAlignment(Qt.AlignJustify|Qt.AlignVCenter)
-        qs = QSizePolicy()
+        qs = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         qs.setRetainSizeWhenHidden(True)
         self.l_warn_selection.setSizePolicy(qs)
         slayout.addWidget(self.l_warn_selection)
@@ -957,7 +961,23 @@ class WalletSettingsDialog(WindowModalDialog):
         cbut.setDefault(False)
         cbut.setAutoDefault(False)
 
-    def update(self):
+    def _show_low_warn_help(self):
+        low_warn_message = (
+            _("Since the targeted number of coins is low, CashFusion may be"
+              " more likely to 'fan out' rather than consolidate coins.")
+            + "<br/><br/>"
+            + _("If you wish to consolidate coins:")
+            + "<ul>"
+            + "<li>" + _("Specify a maximum of 1 queued fusion")
+            + "<li>" + _("Set 'self-fusing' to 'No'")
+            + "<li>" + _("Check the 'only when all coins are confirmed' checkbox")
+            + "</ul>"
+            + _("If you do not wish to necessarily consolidate coins, then it's"
+                " perfectly acceptable to ignore the above heuristics.")
+        )
+        self.show_message(low_warn_message, title=_('Help'), rich_text=True)
+
+    def refresh(self):
         eligible, ineligible, sum_value, has_unconfirmed = select_coins(self.wallet)
         select_type, select_amount = self.wallet.storage.get('cashfusion_selector', DEFAULT_SELECTOR)
 
@@ -975,12 +995,12 @@ class WalletSettingsDialog(WindowModalDialog):
                 self.radio_select_size.setChecked(True)
                 sel_size = select_amount
                 if sum_value > 0:
-                    sel_fraction = min(COIN_FRACTION_FUDGE_FACTOR * select_amount / sum_value, 1)
+                    sel_fraction = min(COIN_FRACTION_FUDGE_FACTOR * select_amount / sum_value, 1.)
                 else:
                     sel_fraction = 1.
             elif select_type == 'count':
                 self.radio_select_count.setChecked(True)
-                sel_size = max(sum_value / select_amount, 10000)
+                sel_size = max(sum_value / max(select_amount, 1), 10000)
                 sel_fraction = COIN_FRACTION_FUDGE_FACTOR / max(select_amount, 1)
             elif select_type == 'fraction':
                 self.radio_select_fraction.setChecked(True)
@@ -988,10 +1008,10 @@ class WalletSettingsDialog(WindowModalDialog):
                 sel_fraction = select_amount
             else:
                 self.wallet.storage.put('cashfusion_selector', None)
-                return self.update()
-            sel_count = COIN_FRACTION_FUDGE_FACTOR / sel_fraction
+                return self.refresh()
+            sel_count = COIN_FRACTION_FUDGE_FACTOR / max(sel_fraction, 0.001)
             self.amt_selector_size.setAmount(round(sel_size))
-            self.sb_selector_fraction.setValue(sel_fraction * 100.)
+            self.sb_selector_fraction.setValue(max(min(1.0 - sel_fraction, 1.0), 0.001) * 100.0)
             self.sb_selector_count.setValue(sel_count)
             try: self.sb_queued_autofuse.setValue(int(self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)))
             except (TypeError, ValueError): pass  # should never happen but paranoia pays off in the long-term
@@ -1009,18 +1029,17 @@ class WalletSettingsDialog(WindowModalDialog):
         if size is None or size < 10000:
             size = 10000
         self.wallet.storage.put('cashfusion_selector', ('size', size))
-        self.update()
+        self.refresh()
 
     def edited_fraction(self,):
-        fraction = self.sb_selector_fraction.value() / 100.
-        fraction = max(0., min(fraction, 1.))
+        fraction = max(1.0 - self.sb_selector_fraction.value() / 100., 0.0)
         self.wallet.storage.put('cashfusion_selector', ('fraction', round(fraction, 3)))
-        self.update()
+        self.refresh()
 
     def edited_count(self,):
         count = self.sb_selector_count.value()
         self.wallet.storage.put('cashfusion_selector', ('count', count))
-        self.update()
+        self.refresh()
 
     def edited_queued_autofuse(self,):
         prevval = self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)
@@ -1029,11 +1048,11 @@ class WalletSettingsDialog(WindowModalDialog):
         if prevval > numfuse:
             for f in self.wallet._fusions_auto:
                 f.stop('User decreased queued-fuse limit', not_if_running = True)
-        self.update()
+        self.refresh()
 
     def clicked_confirmed_only(self, checked):
         self.wallet.storage.put('cashfusion_autofuse_only_when_all_confirmed', checked)
-        self.update()
+        self.refresh()
 
     def chose_self_fuse(self,):
         sel = self.combo_self_fuse.currentData()
@@ -1044,7 +1063,7 @@ class WalletSettingsDialog(WindowModalDialog):
                 # we have to stop waiting fusions since the tags won't overlap.
                 # otherwise, the user will end up self fusing way too much.
                 f.stop('User changed self-fuse limit', not_if_running = True)
-        self.update()
+        self.refresh()
 
     def closeEvent(self, event):
         super().closeEvent(event)
@@ -1055,7 +1074,7 @@ class WalletSettingsDialog(WindowModalDialog):
     def showEvent(self, event):
         super().showEvent(event)
         if event.isAccepted():
-            self.update()
+            self.refresh()
 
 
 class ServerFusionsBaseMixin:
