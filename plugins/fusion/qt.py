@@ -912,11 +912,10 @@ class WalletSettingsDialog(WindowModalDialog):
         self.radio_select_fraction.clicked.connect(self.sb_selector_fraction.setFocus)
         self.radio_select_count.clicked.connect(self.sb_selector_count.setFocus)
 
-        low_warn_blurb = _("Consolidation unlikely")
-        low_warn_blurb_link = '<a href="unused">' + _("Click here for more info") + '</a>'
-
-        self.l_warn_selection = QLabel("<center>" + low_warn_blurb + "<br/>" + low_warn_blurb_link + "</center>")
-        self.l_warn_selection.setToolTip(_("Click for help on consolidation"))
+        low_warn_blurb = _("Click for consolidation info")
+        low_warn_blurb_link = '<a href="unused">' + low_warn_blurb + '</a>'
+        self.l_warn_selection = QLabel("<center>" + low_warn_blurb_link + "</center>")
+        self.l_warn_selection.setToolTip(low_warn_blurb)
         self.l_warn_selection.linkActivated.connect(self._show_low_warn_help)
         self.l_warn_selection.setAlignment(Qt.AlignJustify|Qt.AlignVCenter)
         qs = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
@@ -963,17 +962,14 @@ class WalletSettingsDialog(WindowModalDialog):
 
     def _show_low_warn_help(self):
         low_warn_message = (
-            _("Since the targeted number of coins is low, CashFusion may be"
-              " more likely to 'fan out' rather than consolidate coins.")
-            + "<br/><br/>"
-            + _("If you wish to consolidate coins:")
+            _("If you wish to consolidate coins:")
             + "<ul>"
             + "<li>" + _("Specify a maximum of 1 queued fusion")
             + "<li>" + _("Set 'self-fusing' to 'No'")
             + "<li>" + _("Check the 'only when all coins are confirmed' checkbox")
             + "</ul>"
             + _("If you do not wish to necessarily consolidate coins, then it's"
-                " perfectly acceptable to ignore the above heuristics.")
+                " perfectly acceptable to ignore this tip.")
         )
         self.show_message(low_warn_message, title=_('Help'), rich_text=True)
 
@@ -981,7 +977,8 @@ class WalletSettingsDialog(WindowModalDialog):
         eligible, ineligible, sum_value, has_unconfirmed = select_coins(self.wallet)
         select_type, select_amount = self.wallet.storage.get('cashfusion_selector', DEFAULT_SELECTOR)
 
-        edit_widgets = [self.amt_selector_size, self.sb_selector_fraction, self.sb_selector_count, self.sb_queued_autofuse]
+        edit_widgets = [self.amt_selector_size, self.sb_selector_fraction, self.sb_selector_count, self.sb_queued_autofuse,
+                        self.cb_autofuse_only_all_confirmed, self.combo_self_fuse]
         try:
             for w in edit_widgets:
                 # Block spurious editingFinished signals and valueChanged signals as
@@ -1015,14 +1012,17 @@ class WalletSettingsDialog(WindowModalDialog):
             self.sb_selector_count.setValue(sel_count)
             try: self.sb_queued_autofuse.setValue(int(self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)))
             except (TypeError, ValueError): pass  # should never happen but paranoia pays off in the long-term
+            conf_only = bool(self.wallet.storage.get('cashfusion_autofuse_only_when_all_confirmed', DEFAULT_AUTOFUSE_CONFIRMED_ONLY))
+            self.cb_autofuse_only_all_confirmed.setChecked(conf_only)
+            self.l_warn_selection.setVisible(sel_fraction > 0.2 and (not conf_only or self.sb_queued_autofuse.value() > 1))
+            idx = 0
+            if self.wallet.storage.get('cashfusion_self_fuse_players', DEFAULT_SELF_FUSE) > 1:
+                idx = 1
+            self.combo_self_fuse.setCurrentIndex(idx)
         finally:
             # re-enable signals
             for w in edit_widgets: w.blockSignals(False)
-        self.l_warn_selection.setVisible(sel_fraction > 0.2)
 
-        self.cb_autofuse_only_all_confirmed.setChecked(self.wallet.storage.get('cashfusion_autofuse_only_when_all_confirmed', DEFAULT_AUTOFUSE_CONFIRMED_ONLY))
-
-        self.combo_self_fuse.setCurrentIndex(self.wallet.storage.get('cashfusion_self_fuse_players', DEFAULT_SELF_FUSE) - 1)
 
     def edited_size(self,):
         size = self.amt_selector_size.get_amount()
