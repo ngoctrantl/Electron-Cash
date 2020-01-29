@@ -48,8 +48,6 @@ class Conf:
 
 
     def __init__(self, wallet):
-        ''' The wallet arg is required.  The config arg is optional but if
-        not specified, global configuration options are not available. '''
         assert wallet
         self.wallet = wallet
 
