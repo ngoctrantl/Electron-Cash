@@ -36,7 +36,11 @@ This only implements a framing protocol:
     <8 byte magic><4 byte length (big endian) of message><message>
 """
 
-import socket, socks, ssl, certifi, time, select, errno
+import certifi
+import socket
+import socks
+import ssl
+import time
 from contextlib import suppress
 
 sslcontext = ssl.create_default_context(cafile=certifi.where())

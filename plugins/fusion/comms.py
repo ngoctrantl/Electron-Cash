@@ -28,10 +28,14 @@
 """
 Protobuf communications system and a generic server+client
 """
-import socket, time, traceback, threading, queue, sys
+import queue
+import socket
+import sys
+import threading
+import traceback
 
-from .connection import open_connection, Connection, BadFrameError
 from . import fusion_pb2 as pb
+from .connection import Connection, BadFrameError
 from .util import FusionError
 from .validation import ValidationError
 from google.protobuf.message import DecodeError
@@ -104,10 +108,10 @@ def recv_pb(connection, pb_class, *expected_field_names, timeout=None):
 _last_net = None
 _last_genesis_hash = None
 def get_current_genesis_hash() -> bytes:
-    '''Returns the genesis_hash of this Electron Cash install's current chain.
+    """Returns the genesis_hash of this Electron Cash install's current chain.
     Note that it detects if the chain has changed, and otherwise caches the raw
     32-bytes value.  This is suitable for putting into the ClientHello message.
-    Both server and client call this function.'''
+    Both server and client call this function."""
     global _last_net, _last_genesis_hash
     if not _last_genesis_hash or _last_net != networks.net:
         _last_genesis_hash = bytes(reversed(bytes.fromhex(networks.net.GENESIS)))

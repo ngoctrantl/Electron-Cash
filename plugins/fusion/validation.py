@@ -35,17 +35,18 @@ from .util import FusionError, sha256, size_of_input, size_of_output, component_
 from . import encrypt
 from .protocol import Protocol
 
-from electroncash.bitcoin import COINBASE_MATURITY
 from electroncash.address import Address
 from electroncash.transaction import TYPE_ADDRESS, get_address_from_output_script
 import electroncash.schnorr as schnorr
 
 from google.protobuf.message import DecodeError
 
+
 class ValidationError(FusionError):
     # This specifically regards malformed requests.
     def __str__(self):
         return f'Validation error: {self.args[0]}'
+
 
 def component_contrib(component, feerate):
     ctype = component.WhichOneof('component')

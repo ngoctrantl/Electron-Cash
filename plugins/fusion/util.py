@@ -35,9 +35,6 @@ from electroncash.address import Address, ScriptOutput, hash160, OpCodes
 from . import fusion_pb2 as pb
 from .protocol import Protocol
 
-from google.protobuf.message import DecodeError
-
-import secrets
 import hashlib
 import ecdsa
 

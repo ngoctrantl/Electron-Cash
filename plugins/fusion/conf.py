@@ -32,12 +32,12 @@ from collections import namedtuple
 from typing import List, Optional, Tuple, Union
 
 class Conf:
-    ''' A class that's a simple wrappr around CashFusion per-wallet settings
-    stored in wallet.storage.  The intended usecase is for outside code
+    """ A class that's a simple wrapper around CashFusion per-wallet settings
+    stored in wallet.storage.  The intended use-case is for outside code
     to construct these object as needed to read a key, e.g.:
             b = Conf(wallet).autofuse     # getter
             Conf(wallet).autofuse = True  # setter
-    '''
+    """
 
     class Defaults:
         Autofuse = False
@@ -99,11 +99,11 @@ class Conf:
 CashFusionServer = namedtuple("CashFusionServer", ('hostname', 'port', 'ssl'))
 
 def _get_default_server_list() -> List[Tuple[str, int, bool]]:
-    ''' Maybe someday this can come from a file or something.  But can also
+    """ Maybe someday this can come from a file or something.  But can also
     always be hard-coded.
 
         Tuple fields: (hostname: str, port: int, ssl: bool)
-    '''
+    """
     return [
         # first one is the default
         CashFusionServer('89.40.7.97', 8787, False),
@@ -112,12 +112,12 @@ def _get_default_server_list() -> List[Tuple[str, int, bool]]:
 
 
 class Global:
-    ''' A class that's a simple wrappr around CashFusion global settings
-    stored in the app-wide config object.  The intended usecase is for outside
+    """ A class that's a simple wrapper around CashFusion global settings
+    stored in the app-wide config object.  The intended use-case is for outside
     code to construct these object as needed to read a key, e.g.:
             h = Global(config).tor_host            # getter
             Global(config).tor_host = 'localhost'  # setter
-    '''
+    """
     class Defaults:
         ServerList : List[Tuple[str, int, bool]] = _get_default_server_list()
         TorHost = 'localhost'

@@ -31,7 +31,6 @@ Base plugin (non-GUI)
 import weakref
 import threading
 import time
-from collections import defaultdict
 
 from electroncash.bitcoin import COINBASE_MATURITY
 from electroncash.plugins import BasePlugin, hook, daemon_command
@@ -41,14 +40,16 @@ from electroncash import Network
 
 from .conf import Conf, Global
 from .fusion import Fusion, can_fuse_from, can_fuse_to, is_tor_port
-from .server import FusionServer, Params
+from .server import FusionServer
 from .covert import limiter
 
-import random # only used to select random coins
+import random  # only used to select random coins
 
 TOR_PORTS = [9050, 9150]
-AUTOFUSE_RECENT_TOR_LIMIT_LOWER = 60  # if more than <N> tor connections have been made recently (see covert.py) then don't start auto-fuses.
-AUTOFUSE_RECENT_TOR_LIMIT_UPPER = 120  # if more than <N> tor connections have been made recently (see covert.py) then shut down auto-fuses that aren't yet started
+# if more than <N> tor connections have been made recently (see covert.py) then don't start auto-fuses.
+AUTOFUSE_RECENT_TOR_LIMIT_LOWER = 60
+# if more than <N> tor connections have been made recently (see covert.py) then shut down auto-fuses that aren't yet started
+AUTOFUSE_RECENT_TOR_LIMIT_UPPER = 120
 
 # heuristic factor: guess that expected number of coins in wallet in equilibrium is = (this number) / fraction
 COIN_FRACTION_FUDGE_FACTOR = 10

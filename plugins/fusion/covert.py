@@ -37,20 +37,21 @@ Covert submission mechanism
 Each connection gets its own thread.
 """
 
-import socket, socks
-
-from .comms import open_connection, send_pb, recv_pb, pb, FusionError
-
+import math
+import random
+import secrets
+import socket
+import socks
+import threading
 import time
-import threading, sys
-import math, random, secrets
-from functools import partial
 from collections import deque
 
 from electroncash.util import PrintError
+from .comms import send_pb, recv_pb, pb, FusionError
+from .connection import open_connection
 
 # how long to remember attempting Tor connections
-TOR_COOLDOWN_TIME = 660 #seconds
+TOR_COOLDOWN_TIME = 660  # seconds
 
 # how long a covert connection is allowed to stay alive without anything happening (as a sanity check measure)
 TIMEOUT_INACTIVE_CONNECTION = 120

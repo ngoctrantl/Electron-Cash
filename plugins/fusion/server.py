@@ -31,20 +31,22 @@ support, however a server admin may run an SSL server proxy such as nginx for
 that purpose.
 """
 
-import socket, threading, time, sys, traceback, secrets
+import secrets
+import sys
+import threading
+import time
+import traceback
 from collections import defaultdict
-
-from .comms import send_pb, recv_pb, ClientHandlerThread, GenericServer, get_current_genesis_hash
-from .util import FusionError, sha256, calc_initial_hash, calc_round_hash, size_of_input, size_of_output, component_fee, dust_limit, gen_keypair, tx_from_components, rand_position
-from . import fusion_pb2 as pb
-from . import pedersen
-from .validation import check_playercommit, check_covert_component, validate_blame, ValidationError, check_input_electrumx
-from .protocol import Protocol
 
 import electroncash.schnorr as schnorr
 from electroncash.util import PrintError, ServerErrorResponse
-
-from google.protobuf.message import DecodeError
+from . import fusion_pb2 as pb
+from .comms import send_pb, recv_pb, ClientHandlerThread, GenericServer, get_current_genesis_hash
+from .protocol import Protocol
+from .util import (FusionError, sha256, calc_initial_hash, calc_round_hash, gen_keypair, tx_from_components,
+                   rand_position)
+from .validation import (check_playercommit, check_covert_component, validate_blame, ValidationError,
+                         check_input_electrumx)
 
 # Resistor "E series" values -- round numbers that are almost geometrically uniform
 E6  = [1.0, 1.5, 2.2, 3.3, 4.7, 6.8]

@@ -26,7 +26,6 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 import threading
-import time
 import weakref
 
 from functools import partial
@@ -38,29 +37,27 @@ from PyQt5.QtWidgets import *
 from electroncash.i18n import _, ngettext, pgettext
 from electroncash.plugins import hook, run_hook
 from electroncash.util import (
-    do_in_main_thread, finalization_print_error, format_satoshis_plain,
-    InvalidPassword, print_error, PrintError, profiler)
+    do_in_main_thread, finalization_print_error, format_satoshis_plain, InvalidPassword, print_error, PrintError,
+    profiler)
 from electroncash.wallet import Abstract_Wallet
 from electroncash_gui.qt.amountedit import BTCAmountEdit
 from electroncash_gui.qt.main_window import ElectrumWindow, StatusBarButton
 from electroncash_gui.qt.popup_widget import ShowPopupLabel, KillPopupLabel
 from electroncash_gui.qt.util import (
-    Buttons, CancelButton, CloseButton, ColorScheme, EnterButton, HelpLabel,
-    OkButton, WaitingDialog, WindowModalDialog)
+    Buttons, CancelButton, CloseButton, ColorScheme, OkButton, WaitingDialog, WindowModalDialog)
 from electroncash_gui.qt.utils import PortValidator, UserPortValidator
 
 from .conf import Conf, Global
 from .fusion import can_fuse_from, can_fuse_to
-from .server import FusionServer, Params
-from .plugin import (
-    FusionPlugin, TOR_PORTS, is_tor_port, get_upnp, COIN_FRACTION_FUDGE_FACTOR,
-    select_coins)
+from .server import Params
+from .plugin import FusionPlugin, TOR_PORTS, COIN_FRACTION_FUDGE_FACTOR, select_coins
 
 from pathlib import Path
 heredir = Path(__file__).parent
 icon_fusion_logo = QIcon(str(heredir / 'Cash Fusion Logo - No Text.svg'))
 icon_fusion_logo_gray = QIcon(str(heredir / 'Cash Fusion Logo - No Text Gray.svg'))
 image_red_exclamation = QImage(str(heredir / 'red_exclamation.png'))
+
 
 class Plugin(FusionPlugin, QObject):
     server_status_changed_signal = pyqtSignal(bool, tuple)
@@ -81,7 +78,6 @@ class Plugin(FusionPlugin, QObject):
         # Shut down plugin.
         # This can be triggered from one wallet's window while
         # other wallets' windows have plugin-related modals open.
-        # TODO: disable auto-fusing
         for window in self.gui.windows:
             # this could be slow since it touches windows one by one... could optimize this by dispatching simultaneously.
             self.on_close_window(window)

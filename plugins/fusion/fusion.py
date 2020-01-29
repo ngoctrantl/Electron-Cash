@@ -32,40 +32,34 @@ This module has no GUI dependency.
 """
 
 from electroncash import schnorr
-from electroncash.address import Address, ScriptOutput, hash160, OpCodes
 from electroncash.bitcoin import public_key_from_private_key
 from electroncash.i18n import _, ngettext, pgettext
-from electroncash.keystore import BIP32_KeyStore
-from electroncash.transaction import Transaction, TYPE_SCRIPT, TYPE_ADDRESS, get_address_from_output_script
-from electroncash.util import (format_satoshis, do_in_main_thread, PrintError,
-                               ServerError, TxHashMismatch)
-from electroncash.wallet import Abstract_Wallet, Standard_Wallet, ImportedWalletBase, Multisig_Wallet
+from electroncash.util import format_satoshis, do_in_main_thread, PrintError, ServerError, TxHashMismatch
+from electroncash.wallet import Standard_Wallet, Multisig_Wallet
 
 from . import encrypt
 from . import fusion_pb2 as pb
 from . import pedersen
-from .comms import open_connection, send_pb, recv_pb, get_current_genesis_hash
+from .comms import send_pb, recv_pb, get_current_genesis_hash
+from .connection import open_connection
 from .conf import Conf
 from .covert import CovertSubmitter, is_tor_port
 from .protocol import Protocol
-from .util import FusionError, sha256, calc_initial_hash, calc_round_hash, size_of_input, size_of_output, component_fee, dust_limit, gen_keypair, tx_from_components, rand_position
+from .util import (FusionError, sha256, calc_initial_hash, calc_round_hash, size_of_input, size_of_output,
+                   component_fee, gen_keypair, tx_from_components, rand_position)
 from .validation import validate_proof_internal, ValidationError, check_input_electrumx
 
 from google.protobuf.message import DecodeError
 
 import copy
-import ecdsa
-import hashlib
 import itertools
 import secrets
-import socket
 import sys
 import threading
 import time
 import weakref
 from collections import defaultdict
-from functools import partial
-from math import ceil, floor
+from math import ceil
 
 # used for tagging fusions in a way privately derived from wallet name
 tag_seed = secrets.token_bytes(16)
@@ -97,7 +91,7 @@ def random_outputs_for_tier(rng, input_amount, scale, offset, max_count, allow_e
     when the input_amount is too small or too large, since it becomes uncommon
     to find a random assortment of values that satisfy the desired constraints.
 
-    On success, this returns a list of length 1 to max_count, of nonnegative
+    On success, this returns a list of length 1 to max_count, of non-negative
     integer values that sum up to exactly input_amount.
 
     The returned values will always exactly sum up to input_amount. This is done
@@ -114,7 +108,7 @@ def random_outputs_for_tier(rng, input_amount, scale, offset, max_count, allow_e
     lambd = 1./scale
 
     remaining = input_amount
-    values = [] # list of fractional random values without offset
+    values = []  # list of fractional random values without offset
     for _ in range(max_count+1):
         val = rng.expovariate(lambd)
         # A ceil here makes sure rounding errors won't sometimes put us over the top.
