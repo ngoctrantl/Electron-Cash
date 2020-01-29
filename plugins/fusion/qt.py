@@ -912,10 +912,11 @@ class WalletSettingsDialog(WindowModalDialog):
         self.radio_select_fraction.clicked.connect(self.sb_selector_fraction.setFocus)
         self.radio_select_count.clicked.connect(self.sb_selector_count.setFocus)
 
-        low_warn_blurb = _("Click for consolidation tips")
+        low_warn_blurb = _("Are you trying to consolidate?")
+        low_warn_tooltip = _("Click for consolidation tips")
         low_warn_blurb_link = '<a href="unused">' + low_warn_blurb + '</a>'
         self.l_warn_selection = QLabel("<center>" + low_warn_blurb_link + "</center>")
-        self.l_warn_selection.setToolTip(low_warn_blurb)
+        self.l_warn_selection.setToolTip(low_warn_tooltip)
         self.l_warn_selection.linkActivated.connect(self._show_low_warn_help)
         self.l_warn_selection.setAlignment(Qt.AlignJustify|Qt.AlignVCenter)
         qs = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
@@ -1008,7 +1009,7 @@ class WalletSettingsDialog(WindowModalDialog):
                 return self.refresh()
             sel_count = COIN_FRACTION_FUDGE_FACTOR / max(sel_fraction, 0.001)
             self.amt_selector_size.setAmount(round(sel_size))
-            self.sb_selector_fraction.setValue(max(min(1.0 - sel_fraction, 1.0), 0.001) * 100.0)
+            self.sb_selector_fraction.setValue(max(min(sel_fraction, 1.0), 0.001) * 100.0)
             self.sb_selector_count.setValue(sel_count)
             try: self.sb_queued_autofuse.setValue(int(self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)))
             except (TypeError, ValueError): pass  # should never happen but paranoia pays off in the long-term
@@ -1032,7 +1033,7 @@ class WalletSettingsDialog(WindowModalDialog):
         self.refresh()
 
     def edited_fraction(self,):
-        fraction = max(1.0 - self.sb_selector_fraction.value() / 100., 0.0)
+        fraction = max(self.sb_selector_fraction.value() / 100., 0.0)
         self.wallet.storage.put('cashfusion_selector', ('fraction', round(fraction, 3)))
         self.refresh()
 
