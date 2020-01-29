@@ -39,31 +39,22 @@ from electroncash.i18n import _, ngettext, pgettext
 from electroncash.util import profiler, PrintError, InvalidPassword
 from electroncash import Network
 
+from .conf import Conf, Global
 from .fusion import Fusion, can_fuse_from, can_fuse_to, is_tor_port
 from .server import FusionServer, Params
 from .covert import limiter
 
 import random # only used to select random coins
 
-DEFAULT_TOR_HOST = 'localhost'
-DEFAULT_TOR_PORT = 9050
 TOR_PORTS = [9050, 9150]
-server_list = [  # first one is the default
-    ('89.40.7.97', 8787, False),
-    ('server2.example.com', 3436, True),
-    ]
 AUTOFUSE_RECENT_TOR_LIMIT_LOWER = 60  # if more than <N> tor connections have been made recently (see covert.py) then don't start auto-fuses.
 AUTOFUSE_RECENT_TOR_LIMIT_UPPER = 120  # if more than <N> tor connections have been made recently (see covert.py) then shut down auto-fuses that aren't yet started
 
-# coin selector options
-DEFAULT_SELECTOR = ('fraction', 0.1)
 # heuristic factor: guess that expected number of coins in wallet in equilibrium is = (this number) / fraction
 COIN_FRACTION_FUDGE_FACTOR = 10
 # for semi-linked addresses (that share txids in their history), avoid linking them with this probability:
 KEEP_LINKED_PROBABILITY = 0.1
 
-DEFAULT_QUEUED_AUTOFUSE = 4
-DEFAULT_AUTOFUSE_CONFIRMED_ONLY = False
 # how long an auto-fusion may stay in 'waiting' state (without starting-soon) before it cancels itself
 AUTOFUSE_INACTIVE_TIMEOUT = 600
 
@@ -137,7 +128,7 @@ def select_random_coins(wallet, eligible, balance, max_coins):
     """
 
     # Determine the fraction that should be used
-    select_type, select_amount = wallet.storage.get('cashfusion_selector', DEFAULT_SELECTOR)
+    select_type, select_amount = Conf(wallet).selector
 
     if select_type == 'size' and int(balance) != 0:
         # user wants to get a typical output of this size (in sats)
@@ -229,26 +220,24 @@ class FusionPlugin(BasePlugin):
         return _("CashFusion Protocol")
 
     def get_server(self, ):
-        return tuple(self.config.get('cashfusion_server', server_list[0]))
+        return Global(self.config).server
 
     def set_server(self, host, port, ssl):
-        assert isinstance(host, str)
-        assert isinstance(port, int)
-        assert isinstance(ssl, bool)
-        self.config.set_key('cashfusion_server', (host, port, ssl))
+        Global(self.config).server = (host, port, ssl)  # type/sanity checking done in setter
 
     def get_torhost(self):
         if self.has_auto_torport():
-            return DEFAULT_TOR_HOST
+            return Global.Defaults.TorHost
         else:
-            return self.config.get('cashfusion_tor_host', DEFAULT_TOR_HOST)
+            return Global(self.config).tor_host
 
     def set_torhost(self, host):
-        # host should be a valid hostname
-        self.config.set_key('cashfusion_tor_host', host)
+        ''' host should be a valid hostname '''
+        if not host: return
+        Global(self.config).tor_host = host
 
     def has_auto_torport(self, ):
-        return self.config.get('cashfusion_tor_port_auto', True)
+        return Global(self.config).tor_port_auto
 
     def get_torport(self, ):
         ''' Retreive either manual port or autodetected port; may return None
@@ -256,19 +245,20 @@ class FusionPlugin(BasePlugin):
         if self.has_auto_torport():
             return self.tor_port_good
         else:
-            return self.config.get('cashfusion_tor_port_manual', DEFAULT_TOR_PORT)
+            return Global(self.config).tor_port_manual
 
     def set_torport(self, port):
         # port may be 'auto' or 'manual' or an int
+        gconf = Global(self.config)
         if port == 'auto':
-            self.config.set_key('cashfusion_tor_port_auto', True)
+            gconf.tor_port_auto = True
             return
         else:
-            self.config.set_key('cashfusion_tor_port_auto', False)
+            gconf.tor_port_auto = False
         if port == 'manual':
             return # we're simply going to use whatever manual port was already set
         assert isinstance(port, int)
-        self.config.set_key('cashfusion_tor_port_manual', port)
+        gconf.tor_port_manual = port
 
     def scan_torport(self, ):
         ''' Scan for Tor proxy on either the manual port or on a series of
@@ -287,7 +277,7 @@ class FusionPlugin(BasePlugin):
 
             portlist.extend(TOR_PORTS)
         else:
-            portlist = [self.config.get('cashfusion_tor_port_manual', DEFAULT_TOR_PORT)]
+            portlist = [ Global(self.config).tor_port_manual ]
 
         for port in portlist:
             if is_tor_port(host, port):
@@ -299,7 +289,7 @@ class FusionPlugin(BasePlugin):
 
     def disable_autofusing(self, wallet):
         self.autofusing_wallets.pop(wallet, None)
-        wallet.storage.put('cashfusion_autofuse', False)
+        Conf(wallet).autofuse = False
         running = []
         for f in wallet._fusions_auto:
             f.stop('Autofusing disabled', not_if_running = True)
@@ -313,7 +303,7 @@ class FusionPlugin(BasePlugin):
         else:
             wallet.check_password(password)
         self.autofusing_wallets[wallet] = password
-        wallet.storage.put('cashfusion_autofuse', True)
+        Conf(wallet).autofuse = True
 
     def is_autofusing(self, wallet):
         return (wallet in self.autofusing_wallets)
@@ -328,7 +318,7 @@ class FusionPlugin(BasePlugin):
         # fusions that were auto-started.
         wallet._fusions_auto = weakref.WeakSet()
 
-        if wallet.storage.get('cashfusion_autofuse', False):
+        if Conf(wallet).autofuse:
             try:
                 self.enable_autofusing(wallet, password)
             except InvalidPassword:
@@ -413,8 +403,8 @@ class FusionPlugin(BasePlugin):
                             wallet._fusions_auto.discard(f)
                         else:
                             num_auto += 1
-                    target_num_auto = wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)
-                    confirmed_only = wallet.storage.get('cashfusion_autofuse_only_when_all_confirmed', DEFAULT_AUTOFUSE_CONFIRMED_ONLY)
+                    target_num_auto = Conf(wallet).queued_autofuse
+                    confirmed_only = Conf(wallet).autofuse_confirmed_only
                     if num_auto < target_num_auto:
                         # we don't have enough auto-fusions running, so start one
                         eligible, ineligible, sum_value, has_unconfirmed = select_coins(wallet)

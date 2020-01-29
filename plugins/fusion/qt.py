@@ -49,12 +49,12 @@ from electroncash_gui.qt.util import (
     OkButton, WaitingDialog, WindowModalDialog)
 from electroncash_gui.qt.utils import PortValidator, UserPortValidator
 
-from .fusion import can_fuse_from, can_fuse_to, DEFAULT_SELF_FUSE
+from .conf import Conf, Global
+from .fusion import can_fuse_from, can_fuse_to
 from .server import FusionServer, Params
 from .plugin import (
-    FusionPlugin, TOR_PORTS, is_tor_port, server_list, get_upnp,
-    DEFAULT_SELECTOR, COIN_FRACTION_FUDGE_FACTOR, select_coins,
-    DEFAULT_QUEUED_AUTOFUSE, DEFAULT_AUTOFUSE_CONFIRMED_ONLY)
+    FusionPlugin, TOR_PORTS, is_tor_port, get_upnp, COIN_FRACTION_FUDGE_FACTOR,
+    select_coins)
 
 from pathlib import Path
 heredir = Path(__file__).parent
@@ -170,7 +170,7 @@ class Plugin(FusionPlugin, QObject):
             # (if inter-wallet fusing is added, this should change.)
             return
 
-        want_autofuse = wallet.storage.get('cashfusion_autofuse', False)
+        want_autofuse = Conf(wallet).autofuse
         self.add_wallet(wallet, window.gui_object.get_cached_password(wallet))
 
         # bit of a dirty hack, to insert our status bar icon (always using index 4, should put us just after the password-changer icon)
@@ -251,7 +251,7 @@ class Plugin(FusionPlugin, QObject):
     def on_network_dialog(self, network_dialog):
         if self.weak_settings_tab and self.weak_settings_tab():
             return  # already exists
-        settings_tab = SettingsWidget(self, self.config)
+        settings_tab = SettingsWidget(self)
         self.server_status_changed_signal.connect(settings_tab.update_server_error)
         tabs = network_dialog.nlayout.tabs
         tabs.addTab(settings_tab, icon_fusion_logo, _('CashFusion'))
@@ -635,10 +635,9 @@ class SettingsWidget(QWidget):
     torscanthread = None
     torscanthread_update = pyqtSignal(object)
 
-    def __init__(self, plugin, config, parent=None):
+    def __init__(self, plugin, parent=None):
         super().__init__(parent)
         self.plugin = plugin
-        self.config = config
         self.torscanthread_ping = threading.Event()
         self.torscanthread_update.connect(self.torport_update)
 
@@ -660,7 +659,7 @@ class SettingsWidget(QWidget):
         self.combo_server_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.combo_server_host.activated.connect(self.combo_server_activated)
         self.combo_server_host.lineEdit().textEdited.connect(self.user_changed_server)
-        self.combo_server_host.addItems([f'{s[0]} ({s[1]}{" - ssl" if s[2] else ""})' for s in server_list])
+        self.combo_server_host.addItems([f'{s[0]} ({s[1]}{" - ssl" if s[2] else ""})' for s in Global.Defaults.ServerList])
         hbox.addWidget(self.combo_server_host)
         hbox.addWidget(QLabel(_("P:")))
         self.le_server_port = QLineEdit()
@@ -725,7 +724,7 @@ class SettingsWidget(QWidget):
         # called initially / when config changes
         host, port, ssl = self.plugin.get_server()
         try: # see if it's in default list, if so we can set it ...
-            index = server_list.index((host,port,ssl))
+            index = Global.Defaults.ServerList.index((host,port,ssl))
         except ValueError: # not in list
             index = -1
         self.combo_server_host.setCurrentIndex(index)
@@ -743,7 +742,7 @@ class SettingsWidget(QWidget):
 
     def combo_server_activated(self, index):
         # only triggered when user selects a combo item
-        self.plugin.set_server(*server_list[index])
+        self.plugin.set_server(*Global.Defaults.ServerList[index])
         self.update_server()
 
     def user_changed_server(self, *args):
@@ -976,7 +975,8 @@ class WalletSettingsDialog(WindowModalDialog):
 
     def refresh(self):
         eligible, ineligible, sum_value, has_unconfirmed = select_coins(self.wallet)
-        select_type, select_amount = self.wallet.storage.get('cashfusion_selector', DEFAULT_SELECTOR)
+        wallet_conf = Conf(self.wallet)
+        select_type, select_amount = wallet_conf.selector
 
         edit_widgets = [self.amt_selector_size, self.sb_selector_fraction, self.sb_selector_count, self.sb_queued_autofuse,
                         self.cb_autofuse_only_all_confirmed, self.combo_self_fuse]
@@ -1005,19 +1005,19 @@ class WalletSettingsDialog(WindowModalDialog):
                 sel_size = max(sum_value * select_amount / COIN_FRACTION_FUDGE_FACTOR, 10000)
                 sel_fraction = select_amount
             else:
-                self.wallet.storage.put('cashfusion_selector', None)
+                wallet_conf.selector = None
                 return self.refresh()
             sel_count = COIN_FRACTION_FUDGE_FACTOR / max(sel_fraction, 0.001)
             self.amt_selector_size.setAmount(round(sel_size))
             self.sb_selector_fraction.setValue(max(min(sel_fraction, 1.0), 0.001) * 100.0)
             self.sb_selector_count.setValue(sel_count)
-            try: self.sb_queued_autofuse.setValue(int(self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)))
+            try: self.sb_queued_autofuse.setValue(wallet_conf.queued_autofuse)
             except (TypeError, ValueError): pass  # should never happen but paranoia pays off in the long-term
-            conf_only = bool(self.wallet.storage.get('cashfusion_autofuse_only_when_all_confirmed', DEFAULT_AUTOFUSE_CONFIRMED_ONLY))
+            conf_only = wallet_conf.autofuse_confirmed_only
             self.cb_autofuse_only_all_confirmed.setChecked(conf_only)
             self.l_warn_selection.setVisible(sel_fraction > 0.2 and (not conf_only or self.sb_queued_autofuse.value() > 1))
             idx = 0
-            if self.wallet.storage.get('cashfusion_self_fuse_players', DEFAULT_SELF_FUSE) > 1:
+            if wallet_conf.self_fuse_players > 1:
                 idx = 1
             self.combo_self_fuse.setCurrentIndex(idx)
         finally:
@@ -1029,37 +1029,39 @@ class WalletSettingsDialog(WindowModalDialog):
         size = self.amt_selector_size.get_amount()
         if size is None or size < 10000:
             size = 10000
-        self.wallet.storage.put('cashfusion_selector', ('size', size))
+        Conf(self.wallet).selector =  ('size', size)
         self.refresh()
 
     def edited_fraction(self,):
         fraction = max(self.sb_selector_fraction.value() / 100., 0.0)
-        self.wallet.storage.put('cashfusion_selector', ('fraction', round(fraction, 3)))
+        Conf(self.wallet).selector = ('fraction', round(fraction, 3))
         self.refresh()
 
     def edited_count(self,):
         count = self.sb_selector_count.value()
-        self.wallet.storage.put('cashfusion_selector', ('count', count))
+        Conf(self.wallet).selector =  ('count', count)
         self.refresh()
 
     def edited_queued_autofuse(self,):
-        prevval = self.wallet.storage.get('cashfusion_queued_autofuse', DEFAULT_QUEUED_AUTOFUSE)
+        wallet_conf = Conf(self.wallet)
+        prevval = wallet_conf.queued_autofuse
         numfuse = self.sb_queued_autofuse.value()
-        self.wallet.storage.put('cashfusion_queued_autofuse', numfuse)
+        wallet_conf.queued_autofuse = numfuse
         if prevval > numfuse:
             for f in self.wallet._fusions_auto:
                 f.stop('User decreased queued-fuse limit', not_if_running = True)
         self.refresh()
 
     def clicked_confirmed_only(self, checked):
-        self.wallet.storage.put('cashfusion_autofuse_only_when_all_confirmed', checked)
+        Conf(self.wallet).autofuse_confirmed_only = checked
         self.refresh()
 
     def chose_self_fuse(self,):
         sel = self.combo_self_fuse.currentData()
-        oldsel = self.wallet.storage.get('cashfusion_self_fuse_players', DEFAULT_SELF_FUSE)
-        self.wallet.storage.put('cashfusion_self_fuse_players', sel)
+        wallet_conf = Conf(self.wallet)
+        oldsel = wallet_conf.self_fuse_players
         if oldsel != sel:
+            wallet_conf.self_fuse_players = sel
             for f in self.wallet._fusions:
                 # we have to stop waiting fusions since the tags won't overlap.
                 # otherwise, the user will end up self fusing way too much.

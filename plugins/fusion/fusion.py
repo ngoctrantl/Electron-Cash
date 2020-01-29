@@ -45,6 +45,7 @@ from . import encrypt
 from . import fusion_pb2 as pb
 from . import pedersen
 from .comms import open_connection, send_pb, recv_pb, get_current_genesis_hash
+from .conf import Conf
 from .covert import CovertSubmitter, is_tor_port
 from .protocol import Protocol
 from .util import FusionError, sha256, calc_initial_hash, calc_round_hash, size_of_input, size_of_output, component_fee, dust_limit, gen_keypair, tx_from_components, rand_position
@@ -69,8 +70,6 @@ from math import ceil, floor
 # used for tagging fusions in a way privately derived from wallet name
 tag_seed = secrets.token_bytes(16)
 
-# self-fusing control
-DEFAULT_SELF_FUSE = 1
 
 def can_fuse_from(wallet):
     """We can only fuse from wallets that are p2pkh, and where we are able
@@ -583,7 +582,7 @@ class Fusion(threading.Thread, PrintError):
 
         tags = []
         for wallet in self.source_wallet_info:
-            selffuse = wallet.storage.get('cashfusion_self_fuse_players', DEFAULT_SELF_FUSE)
+            selffuse = Conf(wallet).self_fuse_players
             tags.append(pb.JoinPools.PoolTag(id = wallet.cashfusion_tag, limit = selffuse))
 
         ## Join waiting pools
