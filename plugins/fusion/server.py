@@ -61,12 +61,12 @@ class Params:
     tiers = [round(b*s) for b in [10000, 100000, 1000000, 10000000] for s in E12]
 
     # How many clients do we want before starting a fusion?
-    min_clients = 6
+    min_clients = 8
     # If all clients submitted largest possible component (uncompressed p2pkh input), how many could we take until the result would exceed 100 kB standard tx size limitation?
     max_clients = (100000 - 12) // (num_components * 173)
 
     # Every round, clients leave ... How many clients do we need as an absolute minimum (for privacy)?
-    min_safe_clients = 4
+    min_safe_clients = 6
 
     # Choose the minimum excess fee based on dividing the overhead amongst players, in the smallest fusion
     # (these overhead numbers assume op_return script size of 1 + 5 (lokad) + 33 (session hash) )
@@ -88,11 +88,11 @@ class Params:
     ip_max_simul_fuse = 3
 
     # Guaranteed time to launch a fusion if the pool has stayed at or above min_clients for this long.
-    start_time_max = 600
+    start_time_max = 1200
     # Inter-fusion delay -- after starting any fusion, wait this long before starting the next one (unless hit max time or pool is full).
-    start_time_spacing = 60
+    start_time_spacing = 120
     # But don't start a fusion if it has only been above min_clients for a short time (unless pool is full).
-    start_time_min = 120
+    start_time_min = 400
 
     # whether to print a lot of logs
     noisy = False
