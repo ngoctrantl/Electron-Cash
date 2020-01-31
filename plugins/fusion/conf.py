@@ -32,7 +32,8 @@ from collections import namedtuple
 from typing import List, Optional, Tuple, Union
 
 class Conf:
-    """ A class that's a simple wrapper around CashFusion per-wallet settings
+    """
+    A class that's a simple wrapper around CashFusion per-wallet settings
     stored in wallet.storage.  The intended use-case is for outside code
     to construct these object as needed to read a key, e.g.:
             b = Conf(wallet).autofuse     # getter
@@ -41,7 +42,9 @@ class Conf:
 
     class Defaults:
         Autofuse = False
+        AutofuseCoinbase = False
         AutofuseConfirmedOnly = False
+        FusionMode = 'normal'
         QueudAutofuse = 4
         Selector = ('fraction', 0.1)  # coin selector options
         SelfFusePlayers = 1 # self-fusing control (1 = just self, more than 1 = self fuse up to N times)
@@ -60,12 +63,37 @@ class Conf:
         self.wallet.storage.put('cashfusion_autofuse', b)
 
     @property
+    def autofuse_coinbase(self) -> bool:
+        return bool(self.wallet.storage.get('cashfusion_autofuse_coinbase', self.Defaults.AutofuseCoinbase))
+    @autofuse_coinbase.setter
+    def autofuse_coinbase(self, b : Optional[bool]):
+        if b is not None: b = bool(b)
+        self.wallet.storage.put('cashfusion_autofuse_coinbase', b)
+
+    @property
     def autofuse_confirmed_only(self) -> bool:
         return bool(self.wallet.storage.get('cashfusion_autofuse_only_when_all_confirmed', self.Defaults.AutofuseConfirmedOnly))
     @autofuse_confirmed_only.setter
     def autofuse_confirmed_only(self, b : Optional[bool]):
         if b is not None: b = bool(b)
         self.wallet.storage.put('cashfusion_autofuse_only_when_all_confirmed', b)
+
+    _valid_fusion_modes = frozenset(('normal', 'consolidate', 'fan-out', 'custom'))
+    @property
+    def fusion_mode(self) -> str:
+        """ Returns a string, one of self._valid_fusion_modes above. """
+        ret = self.wallet.storage.get('cashfusion_fusion_mode', self.Defaults.FusionMode)
+        ret = ret.lower().strip() if isinstance(ret, str) else ret
+        if ret not in self._valid_fusion_modes:
+            return self.Defaults.FusionMode
+        return ret
+    @fusion_mode.setter
+    def fusion_mode(self, m : Optional[str]):
+        if m is not None:
+            assert isinstance(m, str)
+            m = m.lower().strip()
+            assert m in self._valid_fusion_modes
+        self.wallet.storage.put('cashfusion_fusion_mode', m)
 
     @property
     def queued_autofuse(self) -> int:
@@ -82,7 +110,7 @@ class Conf:
         return tuple(self.wallet.storage.get('cashfusion_selector', self.Defaults.Selector))
     @selector.setter
     def selector(self, t : Optional[ Tuple[str, Union[int,float]] ]):
-        ''' Optional: Pass None to clear the key '''
+        """ Optional: Pass None to clear the key """
         assert t is None or (isinstance(t, (tuple, list)) and len(t) == 2)
         self.wallet.storage.put('cashfusion_selector', t)
 
@@ -96,10 +124,12 @@ class Conf:
             i = int(i)
         return self.wallet.storage.put('cashfusion_self_fuse_players', i)
 
+
 CashFusionServer = namedtuple("CashFusionServer", ('hostname', 'port', 'ssl'))
 
 def _get_default_server_list() -> List[Tuple[str, int, bool]]:
-    """ Maybe someday this can come from a file or something.  But can also
+    """
+    Maybe someday this can come from a file or something.  But can also
     always be hard-coded.
 
         Tuple fields: (hostname: str, port: int, ssl: bool)
@@ -112,7 +142,8 @@ def _get_default_server_list() -> List[Tuple[str, int, bool]]:
 
 
 class Global:
-    """ A class that's a simple wrapper around CashFusion global settings
+    """
+    A class that's a simple wrapper around CashFusion global settings
     stored in the app-wide config object.  The intended use-case is for outside
     code to construct these object as needed to read a key, e.g.:
             h = Global(config).tor_host            # getter

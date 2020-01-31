@@ -37,8 +37,8 @@ from PyQt5.QtWidgets import *
 from electroncash.i18n import _, ngettext, pgettext
 from electroncash.plugins import hook, run_hook
 from electroncash.util import (
-    do_in_main_thread, finalization_print_error, format_satoshis_plain, InvalidPassword, print_error, PrintError,
-    profiler)
+    do_in_main_thread, finalization_print_error, format_satoshis_plain, InvalidPassword, inv_dict, print_error,
+    PrintError, profiler)
 from electroncash.wallet import Abstract_Wallet
 from electroncash_gui.qt.amountedit import BTCAmountEdit
 from electroncash_gui.qt.main_window import ElectrumWindow, StatusBarButton
@@ -408,8 +408,7 @@ class PasswordDialog(WindowModalDialog):
         self.callback_cancel = callback_cancel
         self.password = None
 
-        vbox = QVBoxLayout()
-        self.setLayout(vbox)
+        vbox = QVBoxLayout(self)
         self.msglabel = QLabel(message)
         self.msglabel.setWordWrap(True)
         self.msglabel.setMinimumWidth(250)
@@ -637,12 +636,11 @@ class SettingsWidget(QWidget):
         self.torscanthread_ping = threading.Event()
         self.torscanthread_update.connect(self.torport_update)
 
-        main_layout = QVBoxLayout()
-        self.setLayout(main_layout)
+        main_layout = QVBoxLayout(self)
 
         box = QGroupBox(_("Network"))
         main_layout.addWidget(box, 0, Qt.AlignTop | Qt.AlignHCenter)
-        slayout = QVBoxLayout() ; box.setLayout(slayout)
+        slayout = QVBoxLayout(box)
 
         grid = QGridLayout() ; slayout.addLayout(grid)
 
@@ -862,17 +860,97 @@ class WalletSettingsDialog(WindowModalDialog):
         self.setWindowIcon(icon_fusion_logo)
         self.plugin = plugin
         self.wallet = wallet
+        self.conf = Conf(self.wallet)
+
+        self.idx2confkey = dict()   # int -> 'normal', 'consolidate', etc..
+        self.confkey2idx = dict()   # str 'normal', 'consolidate', etc -> int
 
         assert not hasattr(self.wallet, '_cashfusion_settings_window')
         main_window = self.wallet.weak_window()
         assert main_window
         self.wallet._cashfusion_settings_window = self
 
-        main_layout = QVBoxLayout()
-        self.setLayout(main_layout)
+        main_layout = QVBoxLayout(self)
 
-        box = QGroupBox(_("Auto-Fusion Coin Selection")) ; main_layout.addWidget(box)
-        slayout = QVBoxLayout() ; box.setLayout(slayout)
+        hbox = QHBoxLayout()
+        hbox.addWidget(QLabel(_('Fusion mode:')))
+        self.mode_cb = mode_cb = QComboBox()
+
+        hbox.addWidget(mode_cb)
+
+        main_layout.addLayout(hbox)
+
+        gb = QGroupBox(_("Coinbase Coins"))
+        vbox = QVBoxLayout(gb)
+        self.cb_coinbase = QCheckBox(_('Auto-fuse coinbase coins (if mature)'))
+        self.cb_coinbase.clicked.connect(self._on_cb_coinbase)
+        vbox.addWidget(self.cb_coinbase)
+        main_layout.addWidget(gb)
+
+
+        box = QGroupBox(_("Self-Fusing"))
+        main_layout.addWidget(box)
+        slayout = QVBoxLayout(box)
+
+        lbl = QLabel(_("Allow this wallet to participate multiply in the same fusion round?"))
+        lbl.setWordWrap(True)
+        slayout.addWidget(lbl)
+        box = QHBoxLayout(); box.setContentsMargins(0,0,0,0)
+        self.combo_self_fuse = QComboBox()
+        self.combo_self_fuse.addItem(_('No'), 1)
+        self.combo_self_fuse.addItem(_('Yes - as up to two players'), 2)
+        box.addStretch(1)
+        box.addWidget(self.combo_self_fuse)
+        slayout.addLayout(box) ; del box
+
+        self.combo_self_fuse.activated.connect(self.chose_self_fuse)
+
+
+        self.stacked_layout = stacked_layout = QStackedLayout()
+        main_layout.addLayout(stacked_layout)
+
+        # Stacked Layout pages ...
+
+        # Normal
+        normal_page_w = QWidget()
+        normal_page_layout = QVBoxLayout(normal_page_w)
+        normal_page_layout.setContentsMargins(0,0,0,0)
+        self.confkey2idx['normal'] = stacked_layout.addWidget(normal_page_w)
+        mode_cb.addItem(_('Normal'))
+        lbl = QLabel("- " + _("Normal mode") + " -")
+        lbl.setAlignment(Qt.AlignCenter)
+        normal_page_layout.addWidget(lbl)
+
+        # Consolidate
+        consolidate_page_w = QWidget()
+        consolidate_page_layout = QVBoxLayout(consolidate_page_w)
+        consolidate_page_layout.setContentsMargins(0,0,0,0)
+        self.confkey2idx['consolidate'] = stacked_layout.addWidget(consolidate_page_w)
+        mode_cb.addItem(_('Consolidate'))
+        lbl = QLabel("- " + _("Consolidation mode") + " -")
+        lbl.setAlignment(Qt.AlignCenter)
+        consolidate_page_layout.addWidget(lbl)
+
+        # Fan-out
+        fanout_page_w = QWidget()
+        fanout_page_layout = QVBoxLayout(fanout_page_w)
+        self.confkey2idx['fan-out'] = stacked_layout.addWidget(fanout_page_w)
+        mode_cb.addItem(_('Fan-out'))
+        lbl = QLabel("- " + _("Fan-out mode") + " -")
+        lbl.setAlignment(Qt.AlignCenter)
+        fanout_page_layout.addWidget(lbl)
+
+        # Custom
+        self.custom_page_w = custom_page_w = QWidget()
+        custom_page_layout = QVBoxLayout(custom_page_w)
+        custom_page_layout.setContentsMargins(0,0,0,0)
+        self.confkey2idx['custom'] = stacked_layout.addWidget(custom_page_w)
+        mode_cb.addItem(_('Custom'))
+
+        mode_cb.currentIndexChanged.connect(self._on_mode_changed)  # intentionally connected after all items already added
+
+        box = QGroupBox(_("Auto-Fusion Coin Selection")) ; custom_page_layout.addWidget(box)
+        slayout = QVBoxLayout(box)
 
         grid = QGridLayout() ; slayout.addLayout(grid)
 
@@ -920,8 +998,8 @@ class WalletSettingsDialog(WindowModalDialog):
         slayout.addWidget(self.l_warn_selection)
         slayout.setAlignment(self.l_warn_selection, Qt.AlignCenter)
 
-        box = QGroupBox(_("Auto-Fusion Limits")) ; main_layout.addWidget(box)
-        slayout = QVBoxLayout() ; box.setLayout(slayout)
+        box = QGroupBox(_("Auto-Fusion Limits")) ; custom_page_layout.addWidget(box)
+        slayout = QVBoxLayout(box)
         grid = QGridLayout() ; slayout.addLayout(grid)
         grid.addWidget(QLabel(_("Number of queued fusions")), 0, 0)
         self.sb_queued_autofuse = QSpinBox()
@@ -935,26 +1013,20 @@ class WalletSettingsDialog(WindowModalDialog):
         self.sb_queued_autofuse.valueChanged.connect(self.edited_queued_autofuse)
         self.cb_autofuse_only_all_confirmed.clicked.connect(self.clicked_confirmed_only)
 
-        box = QGroupBox(_("Self-Fusing")) ; main_layout.addWidget(box)
-        slayout = QVBoxLayout() ; box.setLayout(slayout)
-
-        lbl = QLabel(_("Allow this wallet to participate multiply in the same fusion round?"))
-        lbl.setWordWrap(True)
-        slayout.addWidget(lbl)
-        box = QHBoxLayout(); box.setContentsMargins(0,0,0,0)
-        self.combo_self_fuse = QComboBox()
-        self.combo_self_fuse.addItem(_('No'), 1)
-        self.combo_self_fuse.addItem(_('Yes - as up to two players'), 2)
-        box.addStretch(1)
-        box.addWidget(self.combo_self_fuse)
-        slayout.addLayout(box) ; del box
-
-        self.combo_self_fuse.activated.connect(self.chose_self_fuse)
+        # / end pages
 
         cbut = CloseButton(self)
         main_layout.addLayout(Buttons(cbut))
         cbut.setDefault(False)
         cbut.setAutoDefault(False)
+
+        self.idx2confkey = inv_dict(self.confkey2idx)  # This must be set-up before this function returns
+
+        # We do this here in addition to in showEvent because on some platforms
+        # (such as macOS), the window animates-in before refreshing properly and
+        # then it refreshes, leading to a jumpy glitch. If we do this, it
+        # slides-in already looking as it should.
+        self.refresh()
 
     def _show_low_warn_help(self):
         low_warn_message = (
@@ -969,53 +1041,98 @@ class WalletSettingsDialog(WindowModalDialog):
         )
         self.show_message(low_warn_message, title=_('Help'), rich_text=True)
 
+    def _on_mode_changed(self, idx : int):
+        self.conf.fusion_mode = self.idx2confkey[idx]  # will raise on bad idx, which indicates programming error.
+        self.refresh()
+
+    def _on_cb_coinbase(self, checked : bool):
+        self.conf.autofuse_coinbase = checked
+        self.refresh()
+
+    def _maybe_switch_page(self):
+        mode = self.conf.fusion_mode
+        oldidx = self.stacked_layout.currentIndex()
+        try:
+            idx = self.confkey2idx[mode]
+            idx_custom = self.confkey2idx['custom']
+            # The below conditional ensures that the custom page always
+            # disappears from the layout if not selected. We do this because it
+            # is rather large and makes this window unnecessarily big. Note this
+            # only works if the 'custom' page is last.. otherwise bad things
+            # happen!
+            assert idx_custom == max(self.confkey2idx.values())  # ensures custom is last page otherwise this code breaks
+            if idx == idx_custom:
+                if not self.stacked_layout.itemAt(idx_custom):
+                    self.stacked_layout.insertWidget(idx_custom, self.custom_page_w)
+            elif self.stacked_layout.count()-1 == idx_custom:
+                self.stacked_layout.takeAt(idx_custom)
+            self.stacked_layout.setCurrentIndex(idx)
+            self.mode_cb.setCurrentIndex(idx)
+        except KeyError as e:
+            # should never happen because settings object filters out unknown modes
+            raise RuntimeError(f"INTERNAL ERROR: Unknown fusion mode: '{mode}'") from e
+
+        self.updateGeometry()
+        self.resize(self.sizeHint())
+
+        return idx == idx_custom
+
     def refresh(self):
         eligible, ineligible, sum_value, has_unconfirmed = select_coins(self.wallet)
-        wallet_conf = Conf(self.wallet)
-        select_type, select_amount = wallet_conf.selector
+
+        select_type, select_amount = self.conf.selector
 
         edit_widgets = [self.amt_selector_size, self.sb_selector_fraction, self.sb_selector_count, self.sb_queued_autofuse,
-                        self.cb_autofuse_only_all_confirmed, self.combo_self_fuse]
+                        self.cb_autofuse_only_all_confirmed, self.combo_self_fuse, self.stacked_layout, self.mode_cb,
+                        self.cb_coinbase]
         try:
             for w in edit_widgets:
                 # Block spurious editingFinished signals and valueChanged signals as
                 # we modify the state and focus of widgets programatically below.
                 # On macOS not doing this led to a very strange/spazzy UI.
                 w.blockSignals(True)
-            self.amt_selector_size.setEnabled(select_type == 'size')
-            self.sb_selector_count.setEnabled(select_type == 'count')
-            self.sb_selector_fraction.setEnabled(select_type == 'fraction')
-            if select_type == 'size':
-                self.radio_select_size.setChecked(True)
-                sel_size = select_amount
-                if sum_value > 0:
-                    sel_fraction = min(COIN_FRACTION_FUDGE_FACTOR * select_amount / sum_value, 1.)
-                else:
-                    sel_fraction = 1.
-            elif select_type == 'count':
-                self.radio_select_count.setChecked(True)
-                sel_size = max(sum_value / max(select_amount, 1), 10000)
-                sel_fraction = COIN_FRACTION_FUDGE_FACTOR / max(select_amount, 1)
-            elif select_type == 'fraction':
-                self.radio_select_fraction.setChecked(True)
-                sel_size = max(sum_value * select_amount / COIN_FRACTION_FUDGE_FACTOR, 10000)
-                sel_fraction = select_amount
-            else:
-                wallet_conf.selector = None
-                return self.refresh()
-            sel_count = COIN_FRACTION_FUDGE_FACTOR / max(sel_fraction, 0.001)
-            self.amt_selector_size.setAmount(round(sel_size))
-            self.sb_selector_fraction.setValue(max(min(sel_fraction, 1.0), 0.001) * 100.0)
-            self.sb_selector_count.setValue(sel_count)
-            try: self.sb_queued_autofuse.setValue(wallet_conf.queued_autofuse)
-            except (TypeError, ValueError): pass  # should never happen but paranoia pays off in the long-term
-            conf_only = wallet_conf.autofuse_confirmed_only
-            self.cb_autofuse_only_all_confirmed.setChecked(conf_only)
-            self.l_warn_selection.setVisible(sel_fraction > 0.2 and (not conf_only or self.sb_queued_autofuse.value() > 1))
+
+            self.cb_coinbase.setChecked(self.conf.autofuse_coinbase)
+
+            is_custom_page = self._maybe_switch_page()
+
             idx = 0
-            if wallet_conf.self_fuse_players > 1:
+            if self.conf.self_fuse_players > 1:
                 idx = 1
             self.combo_self_fuse.setCurrentIndex(idx)
+            del idx
+
+            if is_custom_page:
+                self.amt_selector_size.setEnabled(select_type == 'size')
+                self.sb_selector_count.setEnabled(select_type == 'count')
+                self.sb_selector_fraction.setEnabled(select_type == 'fraction')
+                if select_type == 'size':
+                    self.radio_select_size.setChecked(True)
+                    sel_size = select_amount
+                    if sum_value > 0:
+                        sel_fraction = min(COIN_FRACTION_FUDGE_FACTOR * select_amount / sum_value, 1.)
+                    else:
+                        sel_fraction = 1.
+                elif select_type == 'count':
+                    self.radio_select_count.setChecked(True)
+                    sel_size = max(sum_value / max(select_amount, 1), 10000)
+                    sel_fraction = COIN_FRACTION_FUDGE_FACTOR / max(select_amount, 1)
+                elif select_type == 'fraction':
+                    self.radio_select_fraction.setChecked(True)
+                    sel_size = max(sum_value * select_amount / COIN_FRACTION_FUDGE_FACTOR, 10000)
+                    sel_fraction = select_amount
+                else:
+                    self.conf.selector = None
+                    return self.refresh()
+                sel_count = COIN_FRACTION_FUDGE_FACTOR / max(sel_fraction, 0.001)
+                self.amt_selector_size.setAmount(round(sel_size))
+                self.sb_selector_fraction.setValue(max(min(sel_fraction, 1.0), 0.001) * 100.0)
+                self.sb_selector_count.setValue(sel_count)
+                try: self.sb_queued_autofuse.setValue(self.conf.queued_autofuse)
+                except (TypeError, ValueError): pass  # should never happen but paranoia pays off in the long-term
+                conf_only = self.conf.autofuse_confirmed_only
+                self.cb_autofuse_only_all_confirmed.setChecked(conf_only)
+                self.l_warn_selection.setVisible(sel_fraction > 0.2 and (not conf_only or self.sb_queued_autofuse.value() > 1))
         finally:
             # re-enable signals
             for w in edit_widgets: w.blockSignals(False)
@@ -1025,39 +1142,37 @@ class WalletSettingsDialog(WindowModalDialog):
         size = self.amt_selector_size.get_amount()
         if size is None or size < 10000:
             size = 10000
-        Conf(self.wallet).selector =  ('size', size)
+        self.conf.selector =  ('size', size)
         self.refresh()
 
     def edited_fraction(self,):
         fraction = max(self.sb_selector_fraction.value() / 100., 0.0)
-        Conf(self.wallet).selector = ('fraction', round(fraction, 3))
+        self.conf.selector = ('fraction', round(fraction, 3))
         self.refresh()
 
     def edited_count(self,):
         count = self.sb_selector_count.value()
-        Conf(self.wallet).selector =  ('count', count)
+        self.conf.selector =  ('count', count)
         self.refresh()
 
     def edited_queued_autofuse(self,):
-        wallet_conf = Conf(self.wallet)
-        prevval = wallet_conf.queued_autofuse
+        prevval = self.conf.queued_autofuse
         numfuse = self.sb_queued_autofuse.value()
-        wallet_conf.queued_autofuse = numfuse
+        self.conf.queued_autofuse = numfuse
         if prevval > numfuse:
-            for f in self.wallet._fusions_auto:
+            for f in list(self.wallet._fusions_auto):
                 f.stop('User decreased queued-fuse limit', not_if_running = True)
         self.refresh()
 
     def clicked_confirmed_only(self, checked):
-        Conf(self.wallet).autofuse_confirmed_only = checked
+        self.conf.autofuse_confirmed_only = checked
         self.refresh()
 
     def chose_self_fuse(self,):
         sel = self.combo_self_fuse.currentData()
-        wallet_conf = Conf(self.wallet)
-        oldsel = wallet_conf.self_fuse_players
+        oldsel = self.conf.self_fuse_players
         if oldsel != sel:
-            wallet_conf.self_fuse_players = sel
+            self.conf.self_fuse_players = sel
             for f in self.wallet._fusions:
                 # we have to stop waiting fusions since the tags won't overlap.
                 # otherwise, the user will end up self fusing way too much.
@@ -1117,15 +1232,13 @@ class ServerWidget(ServerFusionsBaseMixin, QWidget):
         QWidget.__init__(self, parent)
         ServerFusionsBaseMixin.__init__(self, plugin)
 
-        main_layout = QVBoxLayout()
-        self.setLayout(main_layout)
+        main_layout = QVBoxLayout(self)
 
         self.serverbox = QGroupBox(_("Server"))
         main_layout.addWidget(self.serverbox)
         #self.serverbox.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
-        slayout = QVBoxLayout()
-        self.serverbox.setLayout(slayout)
+        slayout = QVBoxLayout(self.serverbox)
 
         self.l_server_status = QLabel()
         slayout.addWidget(self.l_server_status)
@@ -1174,14 +1287,12 @@ class FusionsWindow(ServerFusionsBaseMixin, QDialog):
         self.setWindowTitle(_("CashFusion - Fusions"))
         self.setWindowIcon(icon_fusion_logo)
 
-        main_layout = QVBoxLayout()
-        self.setLayout(main_layout)
+        main_layout = QVBoxLayout(self)
 
         clientbox = QGroupBox(_("Fusions"))
         main_layout.addWidget(clientbox)
 
-        clayout = QVBoxLayout()
-        clientbox.setLayout(clayout)
+        clayout = QVBoxLayout(clientbox)
 
         self.t_active_fusions = QTreeWidget()
         self.t_active_fusions.setHeaderLabels([_('Wallet'), _('Status'), _('Status Extra')])

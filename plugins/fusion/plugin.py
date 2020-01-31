@@ -28,9 +28,10 @@
 """
 Base plugin (non-GUI)
 """
-import weakref
+import math
 import threading
 import time
+import weakref
 
 from electroncash.bitcoin import COINBASE_MATURITY
 from electroncash.plugins import BasePlugin, hook, daemon_command
@@ -53,11 +54,15 @@ AUTOFUSE_RECENT_TOR_LIMIT_UPPER = 120
 
 # heuristic factor: guess that expected number of coins in wallet in equilibrium is = (this number) / fraction
 COIN_FRACTION_FUDGE_FACTOR = 10
-# for semi-linked addresses (that share txids in their history), avoid linking them with this probability:
+# for semi-linked addresses (that share txids in their history), allow linking them with this probability:
 KEEP_LINKED_PROBABILITY = 0.1
 
 # how long an auto-fusion may stay in 'waiting' state (without starting-soon) before it cancels itself
 AUTOFUSE_INACTIVE_TIMEOUT = 600
+
+# how many random coins to select max in 1 batch -- used by select_random_coins
+DEFAULT_MAX_COINS = 20
+assert DEFAULT_MAX_COINS > 5
 
 pnp = None
 def get_upnp():
@@ -95,7 +100,8 @@ def select_coins(wallet):
     ineligible = []
     has_unconfirmed = False
     sum_value = 0
-    mincbheight = wallet.get_local_height() + 1 - COINBASE_MATURITY
+    mincbheight = (wallet.get_local_height() + 1 - COINBASE_MATURITY if Conf(wallet).autofuse_coinbase
+                   else -1)  # -1 here causes coinbase coins to always be rejected
     for addr in wallet.get_addresses():
         acoins = list(wallet.get_addr_utxo(addr).values())
         sum_value += sum(c['value'] for c in acoins)
@@ -123,29 +129,12 @@ def select_coins(wallet):
 
     return eligible, ineligible, sum_value, has_unconfirmed
 
-def select_random_coins(wallet, eligible, balance, max_coins):
+def select_random_coins(wallet, fraction, eligible):
     """
     Grab wallet coins with a certain probability, while also paying attention
     to obvious linkages and possible linkages.
     Returns list of list of coins (bucketed by obvious linkage).
     """
-
-    # Determine the fraction that should be used
-    select_type, select_amount = Conf(wallet).selector
-
-    if select_type == 'size' and int(balance) != 0:
-        # user wants to get a typical output of this size (in sats)
-        fraction = COIN_FRACTION_FUDGE_FACTOR * select_amount / balance
-    elif select_type == 'count' and int(select_amount) != 0:
-        # user wants this number of coins
-        fraction = COIN_FRACTION_FUDGE_FACTOR / select_amount
-    elif select_type == 'fraction':
-        # user wants this fraction
-        fraction = select_amount
-    else:
-        fraction = 0.1
-    # note: fraction at this point could be <0 or >1 but doesn't matter.
-
     # First, we want to bucket coins together when they have obvious linkage.
     # Coins that are linked together should be spent together.
     # Currently, just look at address.
@@ -164,11 +153,10 @@ def select_random_coins(wallet, eligible, balance, max_coins):
     result = []
     num_coins = 0
     for addr, acoins in addr_coins:
-        if num_coins + len(acoins) > max_coins:
-            # we don't keep trying other buckets even though others might put us at max_coins exactly
-            break
+        if num_coins + len(acoins) > DEFAULT_MAX_COINS:
+            continue
 
-        # For each coin in the bucket, we give a separate chance of joining.
+        # For each bucket, we give a separate chance of joining.
         if random.random() > fraction:
             continue
 
@@ -194,6 +182,57 @@ def select_random_coins(wallet, eligible, balance, max_coins):
             pass
 
     return result
+
+def get_target_params_1(wallet, eligible):
+    """ WIP -- TODO: Rename this function. """
+    wallet_conf = Conf(wallet)
+    mode = wallet_conf.fusion_mode
+
+    get_n_coins = lambda: sum(len(acoins) for addr,acoins in eligible)
+    if mode == 'normal':
+        n_coins = get_n_coins()
+        return max(2, round(n_coins / DEFAULT_MAX_COINS)), False
+    elif mode == 'fan-out':
+        n_coins = get_n_coins()
+        return max(4, math.ceil(n_coins / (COIN_FRACTION_FUDGE_FACTOR*0.65))), False
+    elif mode == 'consolidate':
+        n_coins = get_n_coins()
+        num_threads = math.trunc(n_coins / (COIN_FRACTION_FUDGE_FACTOR*1.5))
+        return num_threads, num_threads <= 1
+    else:  # 'custom'
+        target_num_auto = wallet_conf.queued_autofuse
+        confirmed_only = wallet_conf.autofuse_confirmed_only
+        return target_num_auto, confirmed_only
+
+def get_target_params_2(wallet, eligible, sum_value):
+    """ WIP -- TODO: Rename this function. """
+    wallet_conf = Conf(wallet)
+    mode = wallet_conf.fusion_mode
+
+    fraction = 0.1
+
+    if mode == 'custom':
+        # Determine the fraction that should be used
+        select_type, select_amount = wallet_conf.selector
+
+        if select_type == 'size' and int(sum_value) != 0:
+            # user wants to get a typical output of this size (in sats)
+            fraction = COIN_FRACTION_FUDGE_FACTOR * select_amount / sum_value
+        elif select_type == 'count' and int(select_amount) != 0:
+            # user wants this number of coins
+            fraction = COIN_FRACTION_FUDGE_FACTOR / select_amount
+        elif select_type == 'fraction':
+            # user wants this fraction
+            fraction = select_amount
+        # note: fraction at this point could be <0 or >1 but doesn't matter.
+    elif mode == 'consolidate':
+        fraction = 1.0
+    elif mode == 'normal':
+        fraction = 0.5
+    elif mode == 'fan-out':
+        fraction = 0.1
+
+    return fraction
 
 
 class FusionPlugin(BasePlugin):
@@ -294,7 +333,7 @@ class FusionPlugin(BasePlugin):
         self.autofusing_wallets.pop(wallet, None)
         Conf(wallet).autofuse = False
         running = []
-        for f in wallet._fusions_auto:
+        for f in list(wallet._fusions_auto):
             f.stop('Autofusing disabled', not_if_running = True)
             if f.status[0] == 'running':
                 running.append(f)
@@ -333,10 +372,10 @@ class FusionPlugin(BasePlugin):
             self.autofusing_wallets.pop(wallet, None)
         with wallet.lock:
             fusions = tuple(getattr(wallet, '_fusions', ()))
-            try:
-                del wallet._fusions
-            except AttributeError:
-                pass
+            try: del wallet._fusions
+            except AttributeError: pass
+            try: del wallet._fusions_auto
+            except AttributeError: pass
         return [f for f in fusions if f.status[0] not in ('complete', 'failed')]
 
 
@@ -406,17 +445,18 @@ class FusionPlugin(BasePlugin):
                             wallet._fusions_auto.discard(f)
                         else:
                             num_auto += 1
-                    wallet_conf = Conf(wallet)
-                    target_num_auto = wallet_conf.queued_autofuse
-                    confirmed_only = wallet_conf.autofuse_confirmed_only
+                    eligible, ineligible, sum_value, has_unconfirmed = select_coins(wallet)
+                    target_num_auto, confirmed_only = get_target_params_1(wallet, eligible)
+                    #self.print_error("params1", target_num_auto, confirmed_only)
                     if num_auto < target_num_auto:
                         # we don't have enough auto-fusions running, so start one
-                        eligible, ineligible, sum_value, has_unconfirmed = select_coins(wallet)
                         if confirmed_only and has_unconfirmed:
-                            for f in wallet._fusions_auto:
+                            for f in list(wallet._fusions_auto):
                                 f.stop('Wallet has unconfirmed coins... waiting.', not_if_running = True)
                             continue
-                        coins = [c for l in select_random_coins(wallet, eligible, sum_value, 20) for c in l]
+                        fraction = get_target_params_2(wallet, eligible, sum_value)
+                        #self.print_error("params2", fraction)
+                        coins = [c for l in select_random_coins(wallet, fraction, eligible) for c in l]
                         if not coins:
                             self.print_error("auto-fusion skipped due to lack of coins")
                             continue
@@ -427,11 +467,9 @@ class FusionPlugin(BasePlugin):
                             self.print_error(f"auto-fusion skipped due to error: {e}")
                             return
                         wallet._fusions_auto.add(f)
-                    elif confirmed_only:
-                        eligible, ineligible, sum_value, has_unconfirmed = select_coins(wallet)
-                        if confirmed_only and has_unconfirmed:
-                            for f in wallet._fusions_auto:
-                                f.stop('Wallet has unconfirmed coins... waiting.', not_if_running = True)
+                    elif confirmed_only and has_unconfirmed:
+                        for f in list(wallet._fusions_auto):
+                            f.stop('Wallet has unconfirmed coins... waiting.', not_if_running = True)
 
     def start_fusion_server(self, network, bindhost, port, upnp = None):
         if self.fusion_server:
