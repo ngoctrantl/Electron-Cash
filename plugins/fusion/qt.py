@@ -914,7 +914,6 @@ class WalletSettingsDialog(WindowModalDialog):
         # Normal
         normal_page_w = QWidget()
         normal_page_layout = QVBoxLayout(normal_page_w)
-        normal_page_layout.setContentsMargins(0,0,0,0)
         self.confkey2idx['normal'] = stacked_layout.addWidget(normal_page_w)
         mode_cb.addItem(_('Normal'))
         lbl = QLabel("- " + _("Normal mode") + " -")
@@ -924,7 +923,6 @@ class WalletSettingsDialog(WindowModalDialog):
         # Consolidate
         consolidate_page_w = QWidget()
         consolidate_page_layout = QVBoxLayout(consolidate_page_w)
-        consolidate_page_layout.setContentsMargins(0,0,0,0)
         self.confkey2idx['consolidate'] = stacked_layout.addWidget(consolidate_page_w)
         mode_cb.addItem(_('Consolidate'))
         lbl = QLabel("- " + _("Consolidation mode") + " -")
