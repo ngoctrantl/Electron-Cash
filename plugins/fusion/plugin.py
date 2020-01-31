@@ -107,11 +107,13 @@ def select_coins(wallet):
             # TODO: there is possibility of disruption here, if we get dust spammed. Need to deal
             # with 'dusty' addresses by ignoring / consolidating dusty coins.
             good = False
-        if addr in wallet.frozen_addresses:
+        elif addr in wallet.frozen_addresses:
             good = False
-        if any(c['slp_token'] or c['is_frozen_coin'] for c in acoins):
+        elif any(c['slp_token'] or c['is_frozen_coin']  # address has SLP coin(s) and/or frozen coin(s)
+                 or (c['coinbase'] and c['height'] > mincbheight)  # address has unmatured coinbase coin(s)
+                 for c in acoins):
             good = False
-        if any(c['height'] <= 0 or (c['coinbase'] and c['height'] < mincbheight) for c in acoins):
+        if any(c['height'] <= 0 for c in acoins):
             good = False
             has_unconfirmed = True
         if good:
@@ -404,8 +406,9 @@ class FusionPlugin(BasePlugin):
                             wallet._fusions_auto.discard(f)
                         else:
                             num_auto += 1
-                    target_num_auto = Conf(wallet).queued_autofuse
-                    confirmed_only = Conf(wallet).autofuse_confirmed_only
+                    wallet_conf = Conf(wallet)
+                    target_num_auto = wallet_conf.queued_autofuse
+                    confirmed_only = wallet_conf.autofuse_confirmed_only
                     if num_auto < target_num_auto:
                         # we don't have enough auto-fusions running, so start one
                         eligible, ineligible, sum_value, has_unconfirmed = select_coins(wallet)
