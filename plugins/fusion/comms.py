@@ -87,8 +87,6 @@ def recv_pb(connection, pb_class, *expected_field_names, timeout=None):
     msg = pb_class()
     try:
         length = msg.ParseFromString(blob)
-        if length != len(blob):
-            raise DecodeError
     except DecodeError as e:
         raise FusionError('message decoding error') from e
 

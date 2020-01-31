@@ -165,7 +165,7 @@ class Connection:
             fillbuf(12 + message_length)
 
             # we have a complete message
-            message = recvbuf[12:12 + message_length]
+            message = bytes(recvbuf[12:12 + message_length])
             del recvbuf[:12 + message_length]
             return message
         finally:
