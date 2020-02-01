@@ -153,7 +153,9 @@ def select_random_coins(wallet, fraction, eligible):
     result = []
     num_coins = 0
     for addr, acoins in addr_coins:
-        if num_coins + len(acoins) > DEFAULT_MAX_COINS:
+        if num_coins >= DEFAULT_MAX_COINS:
+            break
+        elif num_coins + len(acoins) > DEFAULT_MAX_COINS:
             continue
 
         # For each bucket, we give a separate chance of joining.
