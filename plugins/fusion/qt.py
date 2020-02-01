@@ -1359,7 +1359,7 @@ class FusionsWindow(ServerFusionsBaseMixin, QDialog):
                 msg = _('Cancel')
             menu.addAction(msg, cancel)
         if selection_of_1_fusion and selection_of_1_fusion.txid:
-            menu.addAction(_("View Tx"), lambda: self._open_tx_for_fusion(selection_of_1_fusion))
+            menu.addAction(_("View Tx..."), lambda: self._open_tx_for_fusion(selection_of_1_fusion))
         if not menu.isEmpty():
             menu.exec_(self.t_active_fusions.viewport().mapToGlobal(position))
 
