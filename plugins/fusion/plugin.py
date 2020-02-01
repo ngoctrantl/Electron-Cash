@@ -99,6 +99,7 @@ def select_coins(wallet):
     eligible = []
     ineligible = []
     has_unconfirmed = False
+    has_coinbase = False
     sum_value = 0
     mincbheight = (wallet.get_local_height() + 1 - COINBASE_MATURITY if Conf(wallet).autofuse_coinbase
                    else -1)  # -1 here causes coinbase coins to always be rejected
@@ -115,19 +116,20 @@ def select_coins(wallet):
             good = False
         elif addr in wallet.frozen_addresses:
             good = False
-        elif any(c['slp_token'] or c['is_frozen_coin']  # address has SLP coin(s) and/or frozen coin(s)
-                 or (c['coinbase'] and c['height'] > mincbheight)  # address has unmatured coinbase coin(s)
+        elif any(c['slp_token'] or c['is_frozen_coin']  # SLP tokens and/or frozen addresses are omitted
+                 or (c['coinbase'] and c['height'] > mincbheight)  # Unmature coinbase coins are omitted as well
                  for c in acoins):
             good = False
         if any(c['height'] <= 0 for c in acoins):
             good = False
             has_unconfirmed = True
+        has_coinbase = has_coinbase or any(c['coinbase'] for c in acoins)
         if good:
             eligible.append((addr,acoins))
         else:
             ineligible.append((addr,acoins))
 
-    return eligible, ineligible, sum_value, has_unconfirmed
+    return eligible, ineligible, sum_value, has_unconfirmed, has_coinbase
 
 def select_random_coins(wallet, fraction, eligible):
     """
@@ -447,7 +449,7 @@ class FusionPlugin(BasePlugin):
                             wallet._fusions_auto.discard(f)
                         else:
                             num_auto += 1
-                    eligible, ineligible, sum_value, has_unconfirmed = select_coins(wallet)
+                    eligible, ineligible, sum_value, has_unconfirmed, has_coinbase = select_coins(wallet)
                     target_num_auto, confirmed_only = get_target_params_1(wallet, eligible)
                     #self.print_error("params1", target_num_auto, confirmed_only)
                     if num_auto < target_num_auto:

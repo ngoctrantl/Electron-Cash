@@ -44,6 +44,7 @@ class Conf:
         Autofuse = False
         AutofuseCoinbase = False
         AutofuseConfirmedOnly = False
+        CoinbaseSeenLatch = False
         FusionMode = 'normal'
         QueudAutofuse = 4
         Selector = ('fraction', 0.1)  # coin selector options
@@ -77,6 +78,14 @@ class Conf:
     def autofuse_confirmed_only(self, b : Optional[bool]):
         if b is not None: b = bool(b)
         self.wallet.storage.put('cashfusion_autofuse_only_when_all_confirmed', b)
+
+    @property
+    def coinbase_seen_latch(self) -> bool:
+        return bool(self.wallet.storage.get('cashfusion_coinbase_seen_latch', self.Defaults.CoinbaseSeenLatch))
+    @coinbase_seen_latch.setter
+    def coinbase_seen_latch(self, b : Optional[bool]):
+        if b is not None: b = bool(b)
+        self.wallet.storage.put('cashfusion_coinbase_seen_latch', b)
 
     _valid_fusion_modes = frozenset(('normal', 'consolidate', 'fan-out', 'custom'))
     @property

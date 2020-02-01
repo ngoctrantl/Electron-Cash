@@ -880,11 +880,16 @@ class WalletSettingsDialog(WindowModalDialog):
 
         main_layout.addLayout(hbox)
 
-        gb = QGroupBox(_("Coinbase Coins"))
+        self.gb_coinbase = gb = QGroupBox(_("Coinbase Coins"))
         vbox = QVBoxLayout(gb)
         self.cb_coinbase = QCheckBox(_('Auto-fuse coinbase coins (if mature)'))
         self.cb_coinbase.clicked.connect(self._on_cb_coinbase)
         vbox.addWidget(self.cb_coinbase)
+         # The coinbase-related group box is hidden by default. It becomes
+         # visible permanently when the wallet settings dialog has seen at least
+         # one coinbase coin, indicating a miner's wallet. For most users the
+         # coinbase checkbox is confusing, which is why we prefer to hide it.
+        gb.setHidden(True)
         main_layout.addWidget(gb)
 
 
@@ -1076,7 +1081,7 @@ class WalletSettingsDialog(WindowModalDialog):
         return idx == idx_custom
 
     def refresh(self):
-        eligible, ineligible, sum_value, has_unconfirmed = select_coins(self.wallet)
+        eligible, ineligible, sum_value, has_unconfirmed, has_coinbase = select_coins(self.wallet)
 
         select_type, select_amount = self.conf.selector
 
@@ -1091,6 +1096,16 @@ class WalletSettingsDialog(WindowModalDialog):
                 w.blockSignals(True)
 
             self.cb_coinbase.setChecked(self.conf.autofuse_coinbase)
+            if not self.gb_coinbase.isVisible():
+                cb_latch = self.conf.coinbase_seen_latch
+                if cb_latch or self.cb_coinbase.isChecked() or has_coinbase:
+                    if not cb_latch:
+                        # Once latched to true, this UI element will forever be
+                        # visible for this wallet.  It means the wallet is a miner's
+                        # wallet and they care about coinbase coins.
+                        self.conf.coinbase_seen_latch = True
+                    self.gb_coinbase.setHidden(False)
+                del cb_latch
 
             is_custom_page = self._maybe_switch_page()
 
