@@ -105,31 +105,40 @@ def select_coins(wallet):
                    else -1)  # -1 here causes coinbase coins to always be rejected
     for addr in wallet.get_addresses():
         acoins = list(wallet.get_addr_utxo(addr).values())
-        sum_value += sum(c['value'] for c in acoins)
-        good = True
         if not acoins:
-            continue
-        if len(acoins) > 3:
-            # skip addresses with too many coins, since they take up lots of 'space' for consolidation.
-            # TODO: there is possibility of disruption here, if we get dust spammed. Need to deal
-            # with 'dusty' addresses by ignoring / consolidating dusty coins.
+            continue  # prevent inserting empty lists into eligible/ineligible
+        good = True
+        if addr in wallet.frozen_addresses:
             good = False
-        elif addr in wallet.frozen_addresses:
-            good = False
-        elif any(c['slp_token'] or c['is_frozen_coin']  # SLP tokens and/or frozen addresses are omitted
-                 or (c['coinbase'] and c['height'] > mincbheight)  # Unmature coinbase coins are omitted as well
-                 for c in acoins):
-            good = False
-        if any(c['height'] <= 0 for c in acoins):
-            good = False
-            has_unconfirmed = True
-        has_coinbase = has_coinbase or any(c['coinbase'] for c in acoins)
+        for i,c in enumerate(acoins):
+            sum_value += c['value']  # tally up values regardless of eligibility
+            # If too many coins, any SLP tokens, any frozen coins, or any
+            # immature coinbase on the address -> flag all address coins as
+            # ineligible if not already flagged as such.
+            good = good and (
+                i < 3  # must not have too many coins on the same address*
+                and not c['slp_token']  # must not be SLP
+                and not c['is_frozen_coin']  # must not be frozen
+                and (not c['coinbase'] or c['height'] <= mincbheight)  # if coinbase -> must be mature coinbase
+            )
+            # * = We skip addresses with too many coins, since they take up lots
+            #     of 'space' for consolidation. TODO: there is possibility of
+            #     disruption here, if we get dust spammed. Need to deal with
+            #     'dusty' addresses by ignoring / consolidating dusty coins.
+
+            # Next, detect has_unconfirmed & has_coinbase:
+            if c['height'] <= 0:
+                # Unconfirmed -> Flag as not eligible and set the has_unconfirmed flag.
+                good = False
+                has_unconfirmed = True
+            # Update has_coinsbase flag if not already set
+            has_coinbase = has_coinbase or c['coinbase']
         if good:
             eligible.append((addr,acoins))
         else:
             ineligible.append((addr,acoins))
 
-    return eligible, ineligible, sum_value, has_unconfirmed, has_coinbase
+    return eligible, ineligible, int(sum_value), bool(has_unconfirmed), bool(has_coinbase)
 
 def select_random_coins(wallet, fraction, eligible):
     """
