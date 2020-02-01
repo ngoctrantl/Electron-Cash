@@ -131,7 +131,7 @@ def select_coins(wallet):
                 # Unconfirmed -> Flag as not eligible and set the has_unconfirmed flag.
                 good = False
                 has_unconfirmed = True
-            # Update has_coinsbase flag if not already set
+            # Update has_coinbase flag if not already set
             has_coinbase = has_coinbase or c['coinbase']
         if good:
             eligible.append((addr,acoins))
