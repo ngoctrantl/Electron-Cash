@@ -116,7 +116,7 @@ def select_coins(wallet):
             # immature coinbase on the address -> flag all address coins as
             # ineligible if not already flagged as such.
             good = good and (
-                i <= 3  # must not have too many coins on the same address*
+                i < 3  # must not have too many coins on the same address*
                 and not c['slp_token']  # must not be SLP
                 and not c['is_frozen_coin']  # must not be frozen
                 and (not c['coinbase'] or c['height'] <= mincbheight)  # if coinbase -> must be mature coinbase
