@@ -87,6 +87,8 @@ message ServerHello { // from server
     required uint64 component_feerate = 4; // sats/kB
     required uint64 min_excess_fee = 5; // sats
     required uint64 max_excess_fee = 6; // sats
+
+    optional string donation_address = 15; // BCH Address "bitcoincash:qpx..."
 }
 
 message JoinPools { // from client

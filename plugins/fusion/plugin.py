@@ -33,6 +33,9 @@ import threading
 import time
 import weakref
 
+from typing import Optional, Tuple
+
+from electroncash.address import Address
 from electroncash.bitcoin import COINBASE_MATURITY
 from electroncash.plugins import BasePlugin, hook, daemon_command
 from electroncash.i18n import _, ngettext, pgettext
@@ -263,6 +266,8 @@ class FusionPlugin(BasePlugin):
         self.autofusing_wallets = weakref.WeakKeyDictionary()  # wallet -> password
         self.lock = threading.RLock() # always order: plugin.lock -> wallet.lock -> fusion.lock
 
+        self.remote_donation_address: str = ''  # optionally announced by the remote server in 'serverhello' message
+
     def on_close(self,):
         super().on_close()
         self.stop_fusion_server()
@@ -274,11 +279,18 @@ class FusionPlugin(BasePlugin):
     def description(self):
         return _("CashFusion Protocol")
 
+    def set_remote_donation_address(self, address : str):
+        self.remote_donation_address = ((isinstance(address, str) and address) or '')[:100]
+
     def get_server(self, ):
         return Global(self.config).server
 
     def set_server(self, host, port, ssl):
-        Global(self.config).server = (host, port, ssl)  # type/sanity checking done in setter
+        gconf = Global(self.config)
+        old = gconf.server
+        gconf.server = (host, port, ssl)  # type/sanity checking done in setter
+        if old != gconf.server:
+            self.on_server_changed()
 
     def get_torhost(self):
         if self.has_auto_torport():
@@ -342,15 +354,30 @@ class FusionPlugin(BasePlugin):
             self.tor_port_good = None
         return self.tor_port_good
 
-    def disable_autofusing(self, wallet):
-        self.autofusing_wallets.pop(wallet, None)
-        Conf(wallet).autofuse = False
+    def on_server_changed(self):
+        """ When the server is changed, we stop all extant fusions that are not
+        already 'running' in order to allow for the new change to take effect
+        immediately. """
+        self.remote_donation_address = ''
+        for wallet in list(self.autofusing_wallets):
+            self._stop_fusions(wallet, 'Server changed', which='all')
+            # FIXME here: restart non-auto fusions on the new server!
+
+    def _stop_fusions(self, wallet, reason, *, not_if_running=True, which='auto'):
+        # which may be 'all' or 'auto'
         running = []
-        for f in list(wallet._fusions_auto):
-            f.stop('Autofusing disabled', not_if_running = True)
+        assert which in ('all', 'auto')
+        fusions = list(wallet._fusions_auto) if which == 'auto' else list(wallet._fusions)
+        for f in fusions:
+            f.stop(reason, not_if_running = not_if_running)
             if f.status[0] == 'running':
                 running.append(f)
         return running
+
+    def disable_autofusing(self, wallet):
+        self.autofusing_wallets.pop(wallet, None)
+        Conf(wallet).autofuse = False
+        return self._stop_fusions(wallet, 'Autofusing disabled', which='auto')
 
     def enable_autofusing(self, wallet, password):
         if password is None and wallet.has_password():
@@ -484,10 +511,11 @@ class FusionPlugin(BasePlugin):
                         for f in list(wallet._fusions_auto):
                             f.stop('Wallet has unconfirmed coins... waiting.', not_if_running = True)
 
-    def start_fusion_server(self, network, bindhost, port, upnp = None):
+    def start_fusion_server(self, network, bindhost, port, upnp = None, donation_address = None):
         if self.fusion_server:
             raise RuntimeError("server already running")
-        self.fusion_server = FusionServer(self.config, network, bindhost, port, upnp = upnp)
+        donation_address = (isinstance(donation_address, Address) and donation_address) or None
+        self.fusion_server = FusionServer(self.config, network, bindhost, port, upnp = upnp, donation_address = donation_address)
         self.fusion_server.start()
         return self.fusion_server.host, self.fusion_server.port
 
@@ -509,18 +537,36 @@ class FusionPlugin(BasePlugin):
         servers. '''
         if not b: self.print_error("notify_server_status:", b, str(tup))
 
+    @hook
+    def donation_address(self, window) -> Optional[Tuple[str,Address]]:
+        ''' Plugin API: Returns a tuple of (description, Address) or None. This
+        is the donation address that we as a client got from the remote server
+        (as opposed to the donation address we announce if we are a server). '''
+        if self.remote_donation_address and Address.is_valid(self.remote_donation_address):
+            return (self.fullname() + " " + _("Server") + ": " + self.get_server()[0], Address.from_string(self.remote_donation_address))
+
     @daemon_command
     def fusion_server_start(self, daemon, config):
         # Usage:
         #   ./electron-cash daemon fusion_server_start <bindhost> <port>
         #   ./electron-cash daemon fusion_server_start <bindhost> <port> upnp
+        #   ./electron-cash daemon fusion_server_start <bindhost> <port> bitcoincash:qpxiweuqoiweweqeweqw  <--- donation address
+        #   ./electron-cash daemon fusion_server_start <bindhost> <port> upnp bitcoincash:qpxiweuqoiweqweqwew  <--- upnp + donation address
         network = daemon.network
         if not network:
             return "error: cannot run fusion server without an SPV server connection"
-        def invoke(bindhost = '0.0.0.0', sport='8787', upnp_str = None):
+        def invoke(bindhost = '0.0.0.0', sport='8787', upnp_str = None, addr_str = None):
             port = int(sport)
             pnp = get_upnp() if upnp_str == 'upnp' else None
-            return self.start_fusion_server(network, bindhost, port, upnp = pnp)
+            if not pnp and not addr_str:
+                # third arg may be addr_str, so swap the args
+                addr_str = upnp_str
+                upnp_str = None
+            addr = None
+            if addr_str:
+                assert Address.is_valid(addr_str), "Invalid donation address specified"
+                addr = Address.from_string(addr_str)
+            return self.start_fusion_server(network, bindhost, port, upnp = pnp, donation_address = addr)
 
         try:
             host, port = invoke(*config.get('subargs', ()))

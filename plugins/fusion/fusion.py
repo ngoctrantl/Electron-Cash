@@ -270,6 +270,10 @@ class Fusion(threading.Thread, PrintError):
         self.roundcount = 0
         self.txid = None  # set iff completed ok
 
+    @property
+    def strong_plugin(self):
+        return self.weak_plugin and self.weak_plugin()
+
     def add_coins(self, coins, keypairs):
         """ Add given P2PKH coins to be used as inputs in a fusion.
 
@@ -368,7 +372,7 @@ class Fusion(threading.Thread, PrintError):
         self.keypairs.clear()
 
     def notify_coins_ui(self, wallet):
-        strong_plugin = self.weak_plugin and self.weak_plugin()
+        strong_plugin = self.strong_plugin  # property get from self.weak_plugin
         if strong_plugin:
             strong_plugin.update_coins_ui(wallet)
 
@@ -376,7 +380,7 @@ class Fusion(threading.Thread, PrintError):
         '''True means server is good, False it's bad. This ultimately makes
         its way to the UI to tell the user there is a connectivity or other
         problem. '''
-        strong_plugin = self.weak_plugin and self.weak_plugin()
+        strong_plugin = self.strong_plugin  # hold strong ref for duration of function
         if strong_plugin:
             if not isinstance(tup, (tuple, list)) or len(tup) != 2:
                 tup = "Ok" if b else "Error", ''
@@ -502,6 +506,9 @@ class Fusion(threading.Thread, PrintError):
         self.min_excess_fee = reply.min_excess_fee
         self.max_excess_fee = reply.max_excess_fee
         self.available_tiers = tuple(reply.tiers)
+        strong_plugin = self.strong_plugin
+        if strong_plugin:
+            strong_plugin.set_remote_donation_address(reply.donation_address)
 
         # Enforce some sensible limits, in case server is crazy
         if self.component_feerate > 5000:

@@ -39,6 +39,7 @@ import traceback
 from collections import defaultdict
 
 import electroncash.schnorr as schnorr
+from electroncash.address import Address
 from electroncash.util import PrintError, ServerErrorResponse
 from . import fusion_pb2 as pb
 from .comms import send_pb, recv_pb, ClientHandlerThread, GenericServer, get_current_genesis_hash
@@ -224,11 +225,13 @@ class FusionServer(GenericServer):
     ClientThread made for them, and they are put into the waiting pools.
     Once a Fusion thread is started, the ClientThreads are passed over to
     a FusionController to run the rounds."""
-    def __init__(self, config, network, bindhost, port, upnp = None):
+    def __init__(self, config, network, bindhost, port, upnp = None, donation_address = None):
         assert network
+        assert isinstance(donation_address, (Address, type(None)))
         super().__init__(bindhost, port, ClientThread, upnp = upnp)
         self.config = config
         self.network = network
+        self.donation_address = donation_address
         self.waiting_pools = {t: WaitingPool(Params.min_clients, Params.max_tier_client_tags) for t in Params.tiers}
         self.t_last_fuse = time.monotonic() # when the last fuse happened; as a placeholder, set this to startup time.
         self.reset_timer()
@@ -315,11 +318,16 @@ class FusionServer(GenericServer):
         if self.stopping:
             return
 
+        donation_address = ''
+        if isinstance(self.donation_address, Address):
+            donation_address = self.donation_address.to_full_ui_string()
+
         client.send(pb.ServerHello( num_components = Params.num_components,
                                     component_feerate = Params.component_feerate,
                                     min_excess_fee = Params.min_excess_fee,
                                     max_excess_fee = Params.max_excess_fee,
-                                    tiers = Params.tiers
+                                    tiers = Params.tiers,
+                                    donation_address = donation_address
                                     ))
 
         # We allow a long timeout for clients to choose their pool.
