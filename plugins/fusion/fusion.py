@@ -406,6 +406,7 @@ class Fusion(threading.Thread, PrintError):
             try:
                 self.connection = open_connection(self.server_host, self.server_port, conn_timeout=5.0, default_timeout=5.0, ssl=self.server_ssl)
             except OSError as e:
+                self.print_error("Connect failed:", repr(e))
                 sslstr = ' SSL ' if self.server_ssl else ''
                 raise FusionError(f'Could not connect to {sslstr}{self.server_host}:{self.server_port}') from e
 
