@@ -226,11 +226,6 @@ plutil -insert 'CFBundleURLTypes' \
 	-- dist/$PACKAGE.app/Contents/Info.plist \
 	|| fail "Could not add keys to Info.plist. Make sure the program 'plutil' exists and is installed."
 
-# For Mojave dark mode support
-info "Adding key to Info.plist for Mojave dark mode"
-plutil -insert 'NSRequiresAquaSystemAppearance' -bool 'NO' -- dist/$PACKAGE.app/Contents/Info.plist \
-  || fail "Could not add NSRequiresAquaSystemAppearance to Info.plist."
-
 DoCodeSignMaybe "app bundle" "dist/${PACKAGE}.app" "$APP_SIGN" # must force a codesign again because Info.plist modified above
 
 info "Creating .DMG"
