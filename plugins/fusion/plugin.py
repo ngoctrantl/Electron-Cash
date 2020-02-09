@@ -44,7 +44,7 @@ from electroncash import Network
 
 from .conf import Conf, Global
 from .fusion import Fusion, can_fuse_from, can_fuse_to, is_tor_port
-from .server import FusionServer
+from .server import FusionServer, Params
 from .covert import limiter
 
 import random  # only used to select random coins
@@ -201,24 +201,30 @@ def select_random_coins(wallet, fraction, eligible):
 
 def get_target_params_1(wallet, eligible):
     """ WIP -- TODO: Rename this function. """
-    wallet_conf = Conf(wallet)
-    mode = wallet_conf.fusion_mode
+    def inner(wallet, eligible):
+        wallet_conf = Conf(wallet)
+        mode = wallet_conf.fusion_mode
 
-    get_n_coins = lambda: sum(len(acoins) for addr,acoins in eligible)
-    if mode == 'normal':
-        n_coins = get_n_coins()
-        return max(2, round(n_coins / DEFAULT_MAX_COINS)), False
-    elif mode == 'fan-out':
-        n_coins = get_n_coins()
-        return max(4, math.ceil(n_coins / (COIN_FRACTION_FUDGE_FACTOR*0.65))), False
-    elif mode == 'consolidate':
-        n_coins = get_n_coins()
-        num_threads = math.trunc(n_coins / (COIN_FRACTION_FUDGE_FACTOR*1.5))
-        return num_threads, num_threads <= 1
-    else:  # 'custom'
-        target_num_auto = wallet_conf.queued_autofuse
-        confirmed_only = wallet_conf.autofuse_confirmed_only
-        return target_num_auto, confirmed_only
+        get_n_coins = lambda: sum(len(acoins) for addr,acoins in eligible)
+        if mode == 'normal':
+            n_coins = get_n_coins()
+            return max(2, round(n_coins / DEFAULT_MAX_COINS)), False
+        elif mode == 'fan-out':
+            n_coins = get_n_coins()
+            return max(4, math.ceil(n_coins / (COIN_FRACTION_FUDGE_FACTOR*0.65))), False
+        elif mode == 'consolidate':
+            n_coins = get_n_coins()
+            num_threads = math.trunc(n_coins / (COIN_FRACTION_FUDGE_FACTOR*1.5))
+            return num_threads, num_threads <= 1
+        else:  # 'custom'
+            target_num_auto = wallet_conf.queued_autofuse
+            confirmed_only = wallet_conf.autofuse_confirmed_only
+            return target_num_auto, confirmed_only
+    def sanitize(num_threads, conf_only):
+        num_threads = min(num_threads, Params.max_tier_client_tags)
+        return num_threads, bool(conf_only)
+    return sanitize(*inner(wallet, eligible))
+
 
 def get_target_params_2(wallet, eligible, sum_value):
     """ WIP -- TODO: Rename this function. """
