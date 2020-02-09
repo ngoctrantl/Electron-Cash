@@ -23,11 +23,13 @@ OSX_COMPAT=""
 #REQUIREMENTS_BINARIES="requirements-binaries${OSX_COMPAT}.txt"
 REQUIREMENTS_BINARIES="requirements-binaries-elcapitan.txt"  # hard-coded for now, uses PyQt5.11
 
-function DoCodeSignMaybe { # ARGS: infoName fileOrDirName codesignIdentity
+function DoCodeSignMaybe { # ARGS: infoName fileOrDirName codesignIdentity entitlements_plist
     infoName="$1"
     file="$2"
     identity="$3"
+    entitlements_plist = "$4"
     deep=""
+    preserve="--preserve-metadata=requirements" #,entitlements"
     if [ -z "$identity" ]; then
         # we are ok with them not passing anything; master script calls us unconditionally even if no identity is specified
         return
@@ -35,14 +37,14 @@ function DoCodeSignMaybe { # ARGS: infoName fileOrDirName codesignIdentity
     if [ -d "$file" ]; then
         deep="--deep"
     fi
-    if [ -z "$infoName" ] || [ -z "$file" ] || [ -z "$identity" ] || [ ! -e "$file" ]; then
+    if [ -z "$infoName" ] || [ -z "$file" ] || [ -z "$identity" ] || [ ! -e "$file" ] || [ ! -e "$entitlements_plist" ]; then
         fail "Argument error to internal function DoCodeSignMaybe()"
     fi
     info "Code signing ${infoName}..."
-    codesign -f -v $deep -s "$identity" --preserve-metadata=requirements,entitlements "$file" || fail "Could not code sign ${infoName}"
+    codesign -f -v $deep -s "$identity" "$preserve" --entitlements "${entitlements_plist}" -o runtime "$file" || fail "Could not code sign ${infoName}"
 }
 
-cd $build_dir/../..
+cd "$build_dir"/../..
 
 VERSION=`git describe --tags`
 
@@ -57,10 +59,11 @@ which xcodebuild > /dev/null 2>&1 || fail "Please install Xcode and xcode comman
 
 # Code Signing: See https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/Procedures/Procedures.html
 APP_SIGN=""
+ENTITLEMENTS_PLIST="$build_dir"/entitlements.plist
 if [ -n "$1" ]; then
     # Test the identity is valid for signing by doing this hack. There is no other way to do this.
     cp -f /bin/ls ./CODESIGN_TEST
-    codesign -s "$1" --dryrun -f ./CODESIGN_TEST > /dev/null 2>&1
+    codesign -s "$1" --dryrun -f --entitlements "${ENTITLEMENTS_PLIST}" -o runtime ./CODESIGN_TEST > /dev/null 2>&1
     res=$?
     rm -f ./CODESIGN_TEST
     if ((res)); then
@@ -226,13 +229,13 @@ plutil -insert 'CFBundleURLTypes' \
 	-- dist/$PACKAGE.app/Contents/Info.plist \
 	|| fail "Could not add keys to Info.plist. Make sure the program 'plutil' exists and is installed."
 
-DoCodeSignMaybe "app bundle" "dist/${PACKAGE}.app" "$APP_SIGN" # must force a codesign again because Info.plist modified above
+DoCodeSignMaybe "app bundle" "dist/${PACKAGE}.app" "$APP_SIGN" "$ENTITLEMENTS_PLIST" # must force a codesign again because Info.plist modified above
 
 info "Creating .DMG"
 
 dmgbuild -D PACKAGE=$PACKAGE -s contrib/osx/dmgbuild.spec "" "dist/${PACKAGE}-${VERSION}${OSX_COMPAT}-macosx.dmg" || fail "Could not create .DMG"
 
-DoCodeSignMaybe ".DMG" "dist/${PACKAGE}-${VERSION}${OSX_COMPAT}-macosx.dmg" "$APP_SIGN" # If APP_SIGN is empty will be a noop
+DoCodeSignMaybe ".DMG" "dist/${PACKAGE}-${VERSION}${OSX_COMPAT}-macosx.dmg" "$APP_SIGN" "$ENTITLEMENTS_PLIST" # If APP_SIGN is empty will be a noop
 
 if [ -z "$APP_SIGN" ]; then
     warn "App was built successfully but was not code signed. Users may get security warnings from macOS."
